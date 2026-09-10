@@ -4823,6 +4823,120 @@ def validate_characterization_beam_handler(
     return fingerprint
 
 
+def validate_characterization_scientific_beam(
+    scientific: dict[str, Any], label: str
+) -> tuple[str, str, str]:
+    """Authenticate finite scientific beam ownership, without phase or admission."""
+    _, _, antennas, _ = validate_characterization_instrument(scientific, label)
+    obj = _input_projection_object
+    beam = _require_keys(
+        obj(scientific["beam"], label),
+        ("resolved", "handlers", "assignment_handler_ids"),
+        label,
+    )
+    resolved = _require_keys(
+        obj(beam["resolved"], label),
+        ("mode", "instrument_fingerprint", "assignments", "unique_definitions"),
+        label,
+    )
+    for key, expected in (
+        ("mode", "analytic"),
+        ("instrument_fingerprint", scientific["instrument"]["instrument_sha256"]),
+    ):
+        _require(type(resolved[key]) is str, SCHEMA, label + ": resolved string")
+        _require(resolved[key] == expected, DIGEST, label + ": " + key + " differs")
+    groups: list[list[Any]] = []
+    for value, count, role in (
+        (resolved["assignments"], 2, "assignments"),
+        (resolved["unique_definitions"], 1, "definitions"),
+        (beam["handlers"], 1, "handlers"),
+        (beam["assignment_handler_ids"], 2, "routes"),
+    ):
+        _require(type(value) is list, SCHEMA, label + ": " + role + " list")
+        values = cast(list[Any], value)
+        _require(len(values) == count, DIGEST, label + ": " + role + " count")
+        groups.append(values)
+    assignments, definitions, handlers, routes = groups
+    definition_sha = validate_characterization_beam_definition(
+        definitions[0], label + " unique definition"
+    )
+    handler_sha = validate_characterization_beam_handler(
+        handlers[0], definitions[0], antennas[0]["diameter_m"], label + " handler"
+    )
+    handler_id = cast(str, handlers[0]["handler_id"])
+    for index, antenna in enumerate(antennas):
+        assignment = _require_keys(
+            obj(assignments[index], label),
+            ("antenna_id", "antenna_diameter_m", "definition", "provenance"),
+            label,
+        )
+        provenance = _require_keys(
+            obj(assignment["provenance"], label),
+            (
+                "source",
+                "input_index",
+                "authored_reference_kind",
+                "authored_reference_value",
+                "canonical_antenna",
+            ),
+            label,
+        )
+        _require(
+            type(provenance["source"]) is str, SCHEMA, label + ": provenance string"
+        )
+        _require(
+            provenance["source"] == "analytic_mode",
+            DIGEST,
+            label + ": provenance differs",
+        )
+        for key in (
+            "input_index",
+            "authored_reference_kind",
+            "authored_reference_value",
+        ):
+            _require(
+                provenance[key] is None, SCHEMA, label + ": authored null required"
+            )
+        route = routes[index]
+        _require(type(route) is list, SCHEMA, label + ": route list")
+        route = cast(list[Any], route)
+        _require(len(route) == 2, SCHEMA, label + ": route arity")
+        for identity in (
+            assignment["antenna_id"],
+            provenance["canonical_antenna"],
+            route[0],
+        ):
+            identity = _require_keys(obj(identity, label), ("number", "name"), label)
+            _require(
+                type(identity["number"]) is int and type(identity["name"]) is str,
+                SCHEMA,
+                label + ": identity types",
+            )
+            _require(
+                identity == {"number": antenna["number"], "name": antenna["name"]},
+                DIGEST,
+                label + ": identity differs",
+            )
+        diameter = _characterization_instrument_float(
+            assignment["antenna_diameter_m"], label + " assignment diameter"
+        )
+        _require(diameter > 0.0, SCHEMA, label + ": positive assignment diameter")
+        _require(
+            f64be(diameter) == f64be(antenna["diameter_m"]),
+            DIGEST,
+            label + ": assignment diameter differs",
+        )
+        assignment_sha = validate_characterization_beam_definition(
+            assignment["definition"], label + " assignment definition"
+        )
+        _require(
+            assignment_sha == definition_sha, DIGEST, label + ": definitions differ"
+        )
+        _require(type(route[1]) is str, SCHEMA, label + ": route ID string")
+        _require(route[1] == handler_id, DIGEST, label + ": route ID differs")
+    return definition_sha, handler_sha, handler_id
+
+
 def _characterization_instrument_float(value: Any, label: str) -> float:
     """Require a normalized native binary64 instrument value without coercion."""
     _require(type(value) is float, SCHEMA, label + ": exact float required")

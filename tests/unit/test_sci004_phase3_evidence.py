@@ -11100,3 +11100,206 @@ def test_characterization_beam_handler_rehashed_refusals(
         )
     assert str(caught.value).startswith(module.DIGEST + ":")
     assert str(caught.value).endswith(": " + detail)
+
+
+def _beam_composition_fixture() -> dict[str, Any]:
+    scientific = _instrument_projection_fixture()
+    scientific["beam"] = _beam_projection_fixture(scientific["instrument"])
+    return scientific
+
+
+def _beam_composition_reframe(scientific: dict[str, Any]) -> bytes:
+    payload = json.dumps(
+        scientific["beam"], sort_keys=True, separators=(",", ":")
+    ).encode()
+    segment = {
+        "tag": "beam",
+        "payload_hex": payload.hex(),
+        "byte_count": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+    }
+    decoded = _tool().decode_scientific_segment(segment, "beam", "independent fixture")
+    assert decoded == payload
+    scientific["beam"] = json.loads(decoded)
+    return payload
+
+
+def test_characterization_scientific_beam_positive() -> None:
+    scientific = _beam_composition_fixture()
+    original = copy.deepcopy(scientific)
+    definition, handler = _beam_projection_preimages()
+    handler_sha = _beam_projection_hash(handler)
+    expected = (
+        _beam_projection_hash(definition),
+        handler_sha,
+        "beam-0000-" + handler_sha[:12],
+    )
+    assert (
+        _tool().validate_characterization_scientific_beam(scientific, "beam")
+        == expected
+    )
+    scientific["beam"] = dict(reversed(tuple(scientific["beam"].items())))
+    _ = _beam_composition_reframe(scientific)
+    assert (
+        _tool().validate_characterization_scientific_beam(scientific, "beam")
+        == expected
+    )
+    assert scientific == original
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        (),
+        ("resolved",),
+        ("resolved", "assignments", 0),
+        ("resolved", "assignments", 0, "antenna_id"),
+        ("resolved", "assignments", 0, "provenance"),
+        ("resolved", "assignments", 0, "provenance", "canonical_antenna"),
+        ("assignment_handler_ids", 0, 0),
+    ],
+)
+@pytest.mark.parametrize("operation", ["missing", "extra"])
+def test_characterization_scientific_beam_closed(
+    path: tuple[Any, ...], operation: str
+) -> None:
+    module = _tool()
+    specimen = _beam_composition_fixture()
+    target = specimen["beam"]
+    for key in path:
+        target = target[key]
+    # Every key is independently removed, not merely the first key at a level.
+    for key in tuple(target):
+        scientific = copy.deepcopy(specimen)
+        row = scientific["beam"]
+        for part in path:
+            row = row[part]
+        before = _beam_composition_reframe(copy.deepcopy(scientific))
+        if operation == "missing":
+            del row[key]
+        else:
+            row["extra_" + key] = None
+        assert _beam_composition_reframe(scientific) != before
+        with pytest.raises(module.EvidenceError) as caught:
+            module.validate_characterization_scientific_beam(scientific, "beam")
+        assert str(caught.value).startswith(module.SCHEMA + ":")
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "instrument",
+        "assignment-order",
+        "duplicate-assignment",
+        "provenance-id",
+        "provenance-source",
+        "diameter",
+        "route-order",
+        "duplicate-route",
+        "route-id",
+        "extra-handler",
+        "missing-handler",
+        "missing-definition",
+        "definition",
+        "handler-hash",
+        "optional-null",
+        "authored-value",
+        "boolean-id",
+        "foreign-id",
+    ],
+)
+def test_characterization_scientific_beam_reframed_refusals(mutation: str) -> None:
+    module = _tool()
+    scientific = _beam_composition_fixture()
+    before = _beam_composition_reframe(copy.deepcopy(scientific))
+    beam = scientific["beam"]
+    resolved = beam["resolved"]
+    row = resolved["assignments"][0]
+    expected = module.DIGEST
+    if mutation == "instrument":
+        resolved["instrument_fingerprint"] = "0" * 64
+    elif mutation == "assignment-order":
+        resolved["assignments"].reverse()
+    elif mutation == "duplicate-assignment":
+        resolved["assignments"][1] = copy.deepcopy(row)
+    elif mutation == "provenance-id":
+        row["provenance"]["canonical_antenna"] = {"number": 1, "name": "ANT1"}
+    elif mutation == "provenance-source":
+        row["provenance"]["source"] = "authored"
+    elif mutation == "diameter":
+        row["antenna_diameter_m"] = 3.0
+    elif mutation == "route-order":
+        beam["assignment_handler_ids"].reverse()
+    elif mutation == "duplicate-route":
+        beam["assignment_handler_ids"][1] = copy.deepcopy(
+            beam["assignment_handler_ids"][0]
+        )
+    elif mutation == "route-id":
+        beam["assignment_handler_ids"][0][1] += "-response"
+    elif mutation == "extra-handler":
+        beam["handlers"].append(copy.deepcopy(beam["handlers"][0]))
+    elif mutation == "missing-handler":
+        beam["handlers"] = []
+    elif mutation == "missing-definition":
+        resolved["unique_definitions"] = []
+    elif mutation == "definition":
+        row["definition"]["model"]["taper"]["edge_taper_db"] = 20.0
+    elif mutation == "handler-hash":
+        _, preimage = _beam_projection_preimages()
+        preimage["contract"] = "other"
+        digest = _beam_projection_hash(preimage)
+        beam["handlers"][0]["scientific_fingerprint"] = digest
+        beam["handlers"][0]["handler_id"] = "beam-0000-" + digest[:12]
+        for route in beam["assignment_handler_ids"]:
+            route[1] = beam["handlers"][0]["handler_id"]
+    elif mutation == "optional-null":
+        row["squint"] = None
+        expected = module.SCHEMA
+    elif mutation == "authored-value":
+        row["provenance"]["input_index"] = 0
+        expected = module.SCHEMA
+    elif mutation == "boolean-id":
+        row["antenna_id"]["number"] = False
+        expected = module.SCHEMA
+    else:
+        row["antenna_id"] = {"number": 5, "name": "ANT5"}
+    assert _beam_composition_reframe(scientific) != before
+    frozen = copy.deepcopy(scientific)
+    with pytest.raises(module.EvidenceError) as caught:
+        module.validate_characterization_scientific_beam(scientific, "beam")
+    assert str(caught.value).startswith(expected + ":")
+    assert scientific == frozen
+
+
+@pytest.mark.parametrize(
+    "path,value",
+    [
+        ((), []),
+        (("resolved",), None),
+        (("resolved", "assignments"), ()),
+        (("resolved", "unique_definitions"), {}),
+        (("handlers",), None),
+        (("assignment_handler_ids",), ()),
+        (("assignment_handler_ids", 0), ()),
+        (("assignment_handler_ids", 0), [None]),
+        (("assignment_handler_ids", 0, 1), 1),
+        (("resolved", "assignments", 0, "antenna_diameter_m"), 2),
+        (("resolved", "assignments", 0, "antenna_id", "name"), 0),
+    ],
+)
+def test_characterization_scientific_beam_native(
+    path: tuple[Any, ...], value: Any
+) -> None:
+    module = _tool()
+    scientific = _beam_composition_fixture()
+    if path:
+        row = scientific["beam"]
+        for key in path[:-1]:
+            row = row[key]
+        row[path[-1]] = value
+    else:
+        scientific["beam"] = value
+    # Do not JSON-normalize malformed native tuples into legitimate lists.
+    with pytest.raises(module.EvidenceError) as caught:
+        module.validate_characterization_scientific_beam(scientific, "beam")
+    assert str(caught.value).startswith(module.SCHEMA + ":")
