@@ -579,6 +579,28 @@ root-completion SHA-256 is
 cleanup authority, or close the CI partition, SCI-004, native interoperability,
 scientific beam validation, exact-SHA CI, or PERF-001.
 
+Selected native export refusal is committed and pushed as
+`8a2d0294aeebba3a91ba19c3ff141f329d741b09`. Attached native materialization is
+refused before the upstream constructor or SkyH5 writer; raw sparse export and
+explicit hybrid point selection remain unchanged. Round2 stopped on the Darwin
+`/usr/bin/python3` trampoline to Xcode 3.9 (E-R2-1,
+`3ee24d262f4ac9eeccfa26ca66e0276d9f5b42eb09bb10e6bb71763c75088a64`) and was
+not rerun. Round3 stopped on one added scoped-Pyright
+`reportUnusedCallResult` (E-R3-1,
+`6ba46f7c0f195611b44632658b2fb0b917d25586c664ca8ba4d4a2fac228c358`) and was
+not rerun. Round4 first-failure gates then passed baseline-apply, format, lint,
+diff, scope-strict, default and py312. Both runtimes collected and passed
+exactly 15 cases with JUnit identity joins and no failures, errors or skips.
+Frozen gate manifest
+`84ab010906ffff49c5f04f39513a179d92cd1615f1bf1c5ed9e48d881026f35d`
+received independent static ACCEPT
+`bc44da968bac6f9e02210db9bf44fc9b15233a6f2b4c261d0cdd983d63215aa9`
+and independent applied-result ACCEPT
+`2134d42ec97407a12a261d4a2f6bdb8ac1cd2bbd2be70fb755839e82abc0a37f`.
+This is local export-refusal evidence. It does not implement child
+serialization, a successful attached roundtrip, or native interoperability
+closure.
+
 L1 cleanup source policy has both independent
 ACCEPTs and root authentication of 139 members (3,897,293 bytes). The unexecuted
 config-probe round1 was rejected for roster, resource-bound and failure-receipt
