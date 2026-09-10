@@ -153,3 +153,38 @@ def bind_serialized_native(value: SerializedNativePayload) -> SerializedPayloadB
         all(not array.flags.writeable for array in arrays), "owner became writeable"
     )
     return SerializedPayloadBinding(metadata, digest.hexdigest(), total)
+
+
+def import_declaration_bytes(
+    *, transfer_id: str, parent_materialization_id: str, serialized_payload_sha256: str
+) -> bytes:
+    """Encode the fixed lane declaration from already verified graph digests.
+
+    This primitive does not verify a graph. Its future consumer must pass actual
+    recomputed transfer/P1/E IDs after checking profile/frame/producer joins,
+    and compare supplied declaration bytes to this result before acceptance.
+    """
+    for value in (transfer_id, parent_materialization_id, serialized_payload_sha256):
+        _require(
+            type(value) is str
+            and len(value) == 64
+            and all(c in "0123456789abcdef" for c in value),
+            "expected lowercase SHA256",
+        )
+    return _json(
+        {
+            "schema_version": "radiosim.native-import-declaration.v1",
+            "source_attribute": "radiosim_polarization_materialization",
+            "source_profile": _PROFILE,
+            "output_profile": "radiosim_ne_iau_v1",
+            "coordinate_frame": "icrs",
+            "producer": {
+                "library": "pyradiosky",
+                "version": "1.1.0",
+                "writer_contract": "radiosim-native-skyh5-v1",
+            },
+            "transfer_id": transfer_id,
+            "parent_materialization_id": parent_materialization_id,
+            "serialized_payload_sha256": serialized_payload_sha256,
+        }
+    )

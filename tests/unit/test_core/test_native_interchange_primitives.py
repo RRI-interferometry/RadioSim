@@ -6,10 +6,12 @@ import struct
 from dataclasses import replace
 
 import numpy as np
+import pytest
 
 from radiosim.core.sky.containers._native_interchange import (
     SerializedNativePayload,
     bind_serialized_native,
+    import_declaration_bytes,
 )
 
 _WORDS = (
@@ -106,3 +108,105 @@ def test_serialized_endpoint_independent_complete_preimage() -> None:
     changed.flags.writeable = False
     assert np.array_equal(changed, owner.stokes)
     assert bind_serialized_native(replace(owner, stokes=changed)) != result
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "duplicate_id",
+        "id_range",
+        "frequency_order",
+        "frequency_nan",
+        "stokes_nan",
+        "dtype",
+        "writeable",
+        "shape",
+        "profile",
+        "context",
+        "nside",
+    ],
+)
+def test_serialized_endpoint_refuses_invalid_actual_input(mutation: str) -> None:
+    owner = _endpoint()
+    if mutation in ("profile", "context", "nside"):
+        key, value = {
+            "profile": ("profile", "radiosim_ne_iau_v1"),
+            "context": ("brightness_conversion", "planck"),
+            "nside": ("nside", 3),
+        }[mutation]
+        owner = replace(owner, **{key: value})
+    else:
+        name = (
+            "pixel_ids"
+            if mutation.startswith("id_") or mutation == "duplicate_id"
+            else "frequencies"
+            if mutation.startswith("frequency")
+            else "stokes"
+        )
+        array = getattr(owner, name).copy()
+        if mutation == "duplicate_id":
+            array[1] = 4
+        elif mutation == "id_range":
+            array[1] = 12
+        elif mutation == "frequency_order":
+            array[:] = [120e6, 80e6]
+        elif mutation in ("frequency_nan", "stokes_nan"):
+            array.flat[0] = np.nan
+        elif mutation == "dtype":
+            array = array.astype("<f4")
+        elif mutation == "shape":
+            array = array[:3]
+        if mutation != "writeable":
+            array.flags.writeable = False
+        owner = replace(owner, **{name: array})
+    with pytest.raises(ValueError):
+        _ = bind_serialized_native(owner)
+
+
+def test_import_declaration_matches_independent_literal_bytes() -> None:
+    expected = {
+        "schema_version": "radiosim.native-import-declaration.v1",
+        "source_attribute": "radiosim_polarization_materialization",
+        "source_profile": "pyradiosky_1_1_0_theta_phi_v1",
+        "output_profile": "radiosim_ne_iau_v1",
+        "coordinate_frame": "icrs",
+        "producer": {
+            "library": "pyradiosky",
+            "version": "1.1.0",
+            "writer_contract": "radiosim-native-skyh5-v1",
+        },
+        "transfer_id": "11" * 32,
+        "parent_materialization_id": "33" * 32,
+        "serialized_payload_sha256": "22" * 32,
+    }
+    actual = import_declaration_bytes(
+        transfer_id="11" * 32,
+        parent_materialization_id="33" * 32,
+        serialized_payload_sha256="22" * 32,
+    )
+    assert (
+        actual == json.dumps(expected, sort_keys=True, separators=(",", ":")).encode()
+    )
+    assert (
+        hashlib.sha256(actual).hexdigest()
+        == "e86d3ac0474dc5253f82d4c5911824b038c0c99af40663ad798314dac6c9852c"
+    )
+    # Symbolic digest-label oracle only; neither call authenticates a graph.
+    assert (
+        import_declaration_bytes(
+            transfer_id="11" * 32,
+            parent_materialization_id="44" * 32,
+            serialized_payload_sha256="22" * 32,
+        )
+        != actual
+    )
+
+
+@pytest.mark.parametrize("value", ["A" * 64, "0" * 63, "g" * 64])
+def test_import_declaration_refuses_noncanonical_digest(value: str) -> None:
+    with pytest.raises(ValueError, match="lowercase SHA256"):
+        _ = import_declaration_bytes(
+            transfer_id=value,
+            parent_materialization_id="33" * 32,
+            serialized_payload_sha256="22" * 32,
+        )
