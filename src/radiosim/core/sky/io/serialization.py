@@ -157,7 +157,14 @@ def to_pyradiosky(sky: SkyModel, representation: Any = None) -> Any:
     """Convert a SkyModel to a pyradiosky.SkyModel for serialization.
 
     ``representation`` is required when both point and HEALPix payloads
-    are populated.
+    are populated. Selected native attachments are validated against the actual
+    model context, then refused until child export and convention serialization
+    are implemented. Raw native exports and explicit hybrid point selection
+    retain their existing behavior.
+
+    Exclude mutation or rebinding through all payload, frequency-axis and
+    pixel-ID aliases throughout this call. Read-only flags and shared backing
+    storage do not establish a coherent concurrent snapshot.
     """
     from pyradiosky import SkyModel as PyRadioSkyModel
 
@@ -169,6 +176,14 @@ def to_pyradiosky(sky: SkyModel, representation: Any = None) -> Any:
         if sky.healpix is None:
             raise ValueError("Cannot serialize missing HEALPix SkyModel payload.")
         healpix = sky.healpix
+        healpix.validate_polarization_materialization(
+            brightness_conversion=sky.brightness_conversion
+        )
+        if healpix.polarization_materialization is not None:
+            raise ValueError(
+                "Native export requires child materialization evidence and "
+                "convention serialization; attached input cannot be exported."
+            )
         healpix_maps = healpix.maps
         nside = healpix.nside
         observation_frequencies = healpix.frequencies
@@ -335,6 +350,10 @@ def save_skyh5(
 
     Notes
     -----
+    Selected native attachments are refused before writing, including when
+    ``clobber=True``. The full-call alias exclusion documented by
+    ``to_pyradiosky`` also applies here through completion of the write.
+
     Point-source fields that pyradiosky cannot represent (rotation measure,
     Gaussian morphology, higher-order log-polynomial spectral terms) are
     dropped; ``to_pyradiosky`` emits a ``UserWarning`` naming exactly what was

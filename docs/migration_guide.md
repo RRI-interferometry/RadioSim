@@ -1210,3 +1210,21 @@ for the entire preparation call; shared read-only arrays are not a snapshot.
 This wrapper guard does not cover independent lower-level operation calls or
 change native m-mode admission. Single-model passthrough still uses the actual
 model context; this change does not reinterpret existing option overrides.
+
+
+### Attached native export boundary
+
+`to_pyradiosky` and `save_skyh5` validate a selected attached HEALPix owner
+against its actual model brightness context, then refuse export until child
+materialization and convention serialization are implemented. This applies
+also to I-only attachments and already sorted channels. `clobber=True` does
+not bypass the refusal or authorize overwriting the destination.
+
+Raw null/null native owners retain their existing export behavior; this is
+compatibility, not polarization-convention qualification. An explicitly selected
+point component of a hybrid retains its existing export path and makes no claim
+to preserve the unselected native component. Missing hybrid selection still
+requires an explicit representation. Exclude mutation or rebinding through all
+payload, frequency-axis and pixel-ID aliases for the whole export/save call;
+read-only flags and shared backing are not exclusive ownership. Successful
+attached export/import and its actual child operation records remain pending.
