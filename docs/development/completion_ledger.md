@@ -644,6 +644,28 @@ This is local unwired transport-identity evidence. It does not implement
 child serialization, file roundtrip, native interoperability, SCI-004,
 exact-SHA CI, or PERF-001.
 
+Native interchange A2 import-declaration encoder is committed and pushed as
+`d2485a835606158c6feb3fe650b99365ad556af2`. The 139-line additive primitive
+(35 production, 104 tests, zero removals) encodes already verified graph
+digest labels without authenticating a graph. Unused A2 proposal R2 does
+not apply onto landed A1 and was not rerun. Round1 stopped at scope-strict
+apply reconstruct (E-A2-R1-1,
+`5593399e92117cab7bcf0b26656eebdfa72bc6ed0f987d4802f48f59a3afac51`)
+because live `git apply` inside `evidence/` discovered RadioSim `.git`;
+that venue was not rerun. The successor git-inits the apply scratch.
+Round2 first-failure gates then passed helper_controls, baseline-apply,
+format, lint, diff, scope-strict, default and py312. Both runtimes
+collected and passed exactly 16 cases with JUnit identity joins and no
+failures, errors or skips. Frozen gate manifest
+`b96bb6479da0e381d3028558ae57409081dbe285015ed5048142570af8e89b73`
+received independent static ACCEPT
+`aa348448b9573261f58293c8cf5f3ffc8c6f9468c8022688322a42f3e497f554`
+and independent applied-result ACCEPT
+`f39fb6ca828fb9b071794cbce93dad5d31cce66b3e85223708a71862faf78926`.
+This is local unwired declaration-encoder evidence. It does not implement
+child serialization, file roundtrip, native interoperability, SCI-004,
+exact-SHA CI, or PERF-001.
+
 L1 cleanup source policy has both independent
 ACCEPTs and root authentication of 139 members (3,897,293 bytes). The unexecuted
 config-probe round1 was rejected for roster, resource-bound and failure-receipt
