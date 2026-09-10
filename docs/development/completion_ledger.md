@@ -560,6 +560,25 @@ received independent applied-result ACCEPT
 This is local S56 status evidence: it does not execute actual CI collection,
 establish observer/session lifecycle, or close the CI partition.
 
+Collector lifecycle observation is committed and pushed as
+`0dc19067de625cf2ef1bd35bb786bfd53c09b660`. The 579-line additive observer
+(230 tool, 349 tests, zero removals) records pytest plugin/session activity on
+both local runtimes without executing actual CI collection. Round16 first-failure
+gates passed the exact sequence controls-default, controls-py312, preflight,
+apply, post-apply, runtime-default, runtime-py312. Scoped Pyright reported
+errorCount 0 with an integer-only summary; both runtimes collected and passed
+exactly 137 cases with no failures, errors or skips. Frozen package manifest
+`4e97df6cf4e98b443679e428f57cb3d88d7cdec68f70f0a81d70d4faa21f5a77`
+received independent static ACCEPT
+`23f52250e64acbd6bd1b46169658d930ca5a06d32aeaf48bb716a058de4064bd`
+and independent applied-result ACCEPT
+`6665f5417c710b073a1da8c1d56c47373a76fd3071ab8e47fab95b0369f13a96`.
+root-completion SHA-256 is
+`4baeaf95a6654d7d31bc2eb866d1c3030a908658d0d63655f06fce7c3e5f1704`.
+`actual_CI_collection` remains false. This does not publish a receipt, activate
+cleanup authority, or close the CI partition, SCI-004, native interoperability,
+scientific beam validation, exact-SHA CI, or PERF-001.
+
 L1 cleanup source policy has both independent
 ACCEPTs and root authentication of 139 members (3,897,293 bytes). The unexecuted
 config-probe round1 was rejected for roster, resource-bound and failure-receipt
