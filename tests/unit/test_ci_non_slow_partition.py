@@ -10,9 +10,11 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from _pytest.config import PytestPluginManager
 
 TOOL = Path(__file__).resolve().parents[2] / "tools/ci_non_slow_partition.py"
 NAMES = (
@@ -854,3 +856,350 @@ def test_collection_exit_code_rejects_foreign_enum_owner() -> None:
 
     with pytest.raises(ValueError, match="exact int or pytest.ExitCode"):
         _partition_tool().collection_exit_code(ForeignExitCode.OK)
+
+
+def _lifecycle_fixture() -> tuple[Any, Any, Any, Any]:
+    module = _partition_tool()
+    manager = PytestPluginManager()
+    observer = module._CollectionLifecycle()
+    _ = manager.register(observer, observer.__name__)
+    config = SimpleNamespace(
+        pluginmanager=manager,
+        option=SimpleNamespace(collectonly=True),
+        _configured=True,
+    )
+    session = SimpleNamespace(
+        config=config,
+        items=[SimpleNamespace(nodeid="tests/a.py::test_one")],
+        exitstatus=0,
+    )
+    return module, manager, observer, session
+
+
+def _lifecycle_dispatch(manager: Any, session: Any) -> None:
+    manager.hook.pytest_sessionstart(session=session)
+    manager.hook.pytest_collection(session=session)
+    manager.hook.pytest_runtestloop(session=session)
+    manager.hook.pytest_sessionfinish(session=session, exitstatus=session.exitstatus)
+
+
+def test_collector_lifecycle_normal_observation_is_not_receipt() -> None:
+    _, manager, observer, session = _lifecycle_fixture()
+    _lifecycle_dispatch(manager, session)
+    session.config._configured = False
+    result = observer.after_main(0)
+    assert result["nodes"] == ("tests/a.py::test_one",)
+    assert result["events"] == (
+        "session_started",
+        "collection_returned",
+        "runtestloop_seen",
+        "session_finished",
+        "pytest_main_returned",
+    )
+    assert result["receipt_ready"] is False
+    with pytest.raises(ValueError, match="duplicate post-main"):
+        observer.after_main(0)
+
+
+@pytest.mark.parametrize("phase", ["sessionfinish", "post-main"])
+def test_collector_lifecycle_rejects_late_item_change(phase: str) -> None:
+    _, manager, observer, session = _lifecycle_fixture()
+    if phase == "sessionfinish":
+
+        class Mutation:
+            @pytest.hookimpl(wrapper=True)
+            def pytest_sessionfinish(self, session: Any, exitstatus: int) -> Any:
+                yield
+                session.items[0].nodeid += "-changed"
+
+        _ = manager.register(Mutation(), "controlled-late-node-change")
+        with pytest.raises(ValueError, match="sessionfinish changed"):
+            _lifecycle_dispatch(manager, session)
+    else:
+        _lifecycle_dispatch(manager, session)
+        session.items[0].nodeid += "-changed"
+        session.config._configured = False
+        with pytest.raises(ValueError, match="post-main changed"):
+            observer.after_main(0)
+    assert observer.poisoned
+
+
+def test_collector_lifecycle_rejects_outer_competitor() -> None:
+    _, manager, observer, session = _lifecycle_fixture()
+
+    class Outer:
+        @pytest.hookimpl(wrapper=True, tryfirst=True)
+        def pytest_sessionfinish(self, session: Any, exitstatus: int) -> Any:
+            result = cast(Any, (yield))
+            return result
+
+    _ = manager.register(Outer(), "later-equal-priority-outer-wrapper")
+    with pytest.raises(ValueError, match="not outermost"):
+        manager.hook.pytest_sessionstart(session=session)
+    assert observer.poisoned
+
+
+@pytest.mark.parametrize("phase", ["protocol", "start", "setup", "call", "teardown"])
+def test_collector_lifecycle_activity_stays_poisoned_if_caught(phase: str) -> None:
+    _, manager, observer, session = _lifecycle_fixture()
+    calls = {
+        "protocol": (
+            "pytest_runtest_protocol",
+            {"item": session.items[0], "nextitem": None},
+        ),
+        "start": (
+            "pytest_runtest_logstart",
+            {
+                "nodeid": "tests/a.py::test_one",
+                "location": ("tests/a.py", 0, "test_one"),
+            },
+        ),
+        "setup": ("pytest_runtest_setup", {"item": session.items[0]}),
+        "call": ("pytest_runtest_call", {"item": session.items[0]}),
+        "teardown": (
+            "pytest_runtest_teardown",
+            {"item": session.items[0], "nextitem": None},
+        ),
+    }
+    name, kwargs = calls[phase]
+    with pytest.raises(ValueError, match="test activity forbidden"):
+        getattr(manager.hook, name)(**kwargs)
+    assert observer.activity[phase] == 1
+    _lifecycle_dispatch(manager, session)
+    session.config._configured = False
+    with pytest.raises(ValueError, match="poisoned or active"):
+        observer.after_main(0)
+
+
+@pytest.mark.parametrize("failure", ["early-return", "still-configured", "status"])
+def test_collector_lifecycle_finalization_refusals(failure: str) -> None:
+    _, manager, observer, session = _lifecycle_fixture()
+    if failure == "early-return":
+        with pytest.raises(ValueError, match="lifecycle order"):
+            observer.after_main(0)
+    else:
+        _lifecycle_dispatch(manager, session)
+        if failure == "still-configured":
+            with pytest.raises(ValueError, match="cleanup not complete"):
+                observer.after_main(0)
+        else:
+            session.config._configured = False
+            with pytest.raises(ValueError, match="status mismatch"):
+                observer.after_main(5)
+
+
+def test_collector_lifecycle_preserves_raw_empty_without_admission() -> None:
+    _, manager, observer, session = _lifecycle_fixture()
+    session.items = []
+    session.exitstatus = 5
+    _lifecycle_dispatch(manager, session)
+    session.config._configured = False
+    result = observer.after_main(5)
+    assert (
+        result["nodes"] == () and result["pytest_return"] == result["session_exit"] == 5
+    )
+    assert (
+        result["receipt_ready"] is False
+    )  # Source, role, prediction and OS joins still required.
+
+
+def test_collector_wrapper_exception_cannot_become_completed() -> None:
+    _, manager, observer, session = _lifecycle_fixture()
+
+    class Failure:
+        @pytest.hookimpl(wrapper=True)
+        def pytest_collection(self, session: Any) -> Any:
+            yield
+            raise RuntimeError("original collection wrapper failure")
+
+    _ = manager.register(Failure(), "controlled-wrapper-failure")
+    manager.hook.pytest_sessionstart(session=session)
+    with pytest.raises(RuntimeError, match="original collection wrapper failure"):
+        manager.hook.pytest_collection(session=session)
+    assert observer.poisoned
+    session.config._configured = False
+    with pytest.raises(ValueError, match="poisoned or active"):
+        observer.after_main(0)
+
+
+def test_collector_node_preflight_bound() -> None:
+    _, manager, _, session = _lifecycle_fixture()
+
+    class Untouched:
+        @property
+        def nodeid(self) -> str:
+            raise AssertionError("node projection entered before item cap")
+
+    session.items = [Untouched()] * 50001
+    manager.hook.pytest_sessionstart(session=session)
+    manager.hook.pytest_collection(session=session)
+    with pytest.raises(ValueError, match="collection item bound"):
+        manager.hook.pytest_runtestloop(session=session)
+
+
+@pytest.mark.parametrize(
+    "phase, missing_event",
+    [
+        ("runtestloop", "runtestloop_seen"),
+        ("sessionfinish", "session_finished"),
+        ("post-main", "pytest_main_returned"),
+    ],
+)
+def test_collector_property_error_stays_poisoned_after_restore(
+    phase: str, missing_event: str
+) -> None:
+    _, manager, observer, session = _lifecycle_fixture()
+    sentinel = RuntimeError("original node property sentinel")
+
+    class Item:
+        @property
+        def nodeid(self) -> str:
+            raise sentinel
+
+    manager.hook.pytest_sessionstart(session=session)
+    manager.hook.pytest_collection(session=session)
+    if phase != "runtestloop":
+        manager.hook.pytest_runtestloop(session=session)
+    if phase == "post-main":
+        manager.hook.pytest_sessionfinish(session=session, exitstatus=0)
+        session.config._configured = False
+    original_items = session.items
+    session.items = [Item()]
+    try:
+        with pytest.raises(RuntimeError) as caught:
+            if phase == "runtestloop":
+                manager.hook.pytest_runtestloop(session=session)
+            elif phase == "sessionfinish":
+                manager.hook.pytest_sessionfinish(session=session, exitstatus=0)
+            else:
+                observer.after_main(0)
+        assert caught.value is sentinel
+    finally:
+        session.items = original_items
+    assert observer.poisoned
+    assert missing_event not in observer.events
+    session.config._configured = False
+    with pytest.raises(ValueError, match="poisoned or active|duplicate post-main"):
+        observer.after_main(0)
+
+
+@pytest.mark.parametrize("phase", ["sessionstart", "sessionfinish"])
+def test_collector_real_manager_lookup_error_stays_poisoned(phase: str) -> None:
+    _, manager, observer, session = _lifecycle_fixture()
+    if phase == "sessionfinish":
+        manager.hook.pytest_sessionstart(session=session)
+        manager.hook.pytest_collection(session=session)
+        manager.hook.pytest_runtestloop(session=session)
+    missing = object()
+    manager_state = cast(dict[str, Any], vars(manager))
+    original_lookup: object = manager_state.get("get_plugin", missing)
+    sentinel = LookupError("original real manager lookup sentinel")
+
+    def fail_lookup(name: str) -> Any:
+        raise sentinel
+
+    manager.get_plugin = fail_lookup
+    try:
+        with pytest.raises(LookupError) as caught:
+            if phase == "sessionstart":
+                manager.hook.pytest_sessionstart(session=session)
+            else:
+                manager.hook.pytest_sessionfinish(session=session, exitstatus=0)
+        assert caught.value is sentinel
+    finally:
+        if original_lookup is missing:
+            del manager.get_plugin
+        else:
+            manager.get_plugin = original_lookup
+    assert observer.poisoned
+    assert (
+        "session_started" if phase == "sessionstart" else "session_finished"
+    ) not in observer.events
+    session.config._configured = False
+    with pytest.raises(ValueError, match="poisoned or active"):
+        observer.after_main(0)
+
+
+@pytest.mark.parametrize("replacement", [None, ("foreign",), []])
+def test_collector_requires_completed_precleanup_capture(replacement: Any) -> None:
+    _, manager, observer, session = _lifecycle_fixture()
+    _lifecycle_dispatch(manager, session)
+    observer.pre_cleanup_nodes = replacement
+    session.config._configured = False
+    with pytest.raises(ValueError, match="completed pre-cleanup capture"):
+        observer.after_main(0)
+    assert observer.poisoned and "pytest_main_returned" not in observer.events
+
+
+@pytest.mark.parametrize(
+    "status, expected",
+    [(pytest.ExitCode.OK, 0), (pytest.ExitCode.NO_TESTS_COLLECTED, 5), (6, 6)],
+)
+def test_collector_actual_status_owners_remain_observations(
+    status: Any, expected: int
+) -> None:
+    _, manager, observer, session = _lifecycle_fixture()
+    session.exitstatus = status
+    if expected == 5:
+        session.items = []
+    _lifecycle_dispatch(manager, session)
+    session.config._configured = False
+    result = observer.after_main(status)
+    assert type(result["pytest_return"]) is int
+    assert result["pytest_return"] == result["session_exit"] == expected
+    assert result["receipt_ready"] is False
+
+
+@pytest.mark.parametrize("where", ["finish", "retained", "return"])
+@pytest.mark.parametrize("invalid", [False, True, 0.5, "0", None])
+def test_collector_invalid_status_cannot_finalize(where: str, invalid: Any) -> None:
+    _, manager, observer, session = _lifecycle_fixture()
+    manager.hook.pytest_sessionstart(session=session)
+    manager.hook.pytest_collection(session=session)
+    manager.hook.pytest_runtestloop(session=session)
+    if where != "finish":
+        manager.hook.pytest_sessionfinish(session=session, exitstatus=0)
+        session.config._configured = False
+    with pytest.raises(ValueError, match="exact int or pytest.ExitCode"):
+        if where == "finish":
+            manager.hook.pytest_sessionfinish(session=session, exitstatus=invalid)
+        else:
+            if where == "retained":
+                session.exitstatus = invalid
+            observer.after_main(invalid if where == "return" else 0)
+    assert observer.poisoned
+    assert "pytest_main_returned" not in observer.events
+    if where == "finish":
+        assert "session_finished" not in observer.events
+        assert observer.pre_cleanup_nodes is None
+
+
+def test_collector_status_property_error_preserves_original_failure() -> None:
+    _, manager, observer, ordinary = _lifecycle_fixture()
+    sentinel = AttributeError("original status property sentinel")
+
+    class Session:
+        armed = False
+        config = ordinary.config
+        items = ordinary.items
+
+        @property
+        def exitstatus(self) -> int:
+            if self.armed:
+                raise sentinel
+            return 0
+
+    session = Session()
+    _lifecycle_dispatch(manager, session)
+    session.config._configured = False
+    session.armed = True
+    try:
+        with pytest.raises(AttributeError) as caught:
+            observer.after_main(pytest.ExitCode.OK)
+        assert caught.value is sentinel
+    finally:
+        session.armed = False
+    assert observer.poisoned
+    assert "pytest_main_returned" not in observer.events
+    with pytest.raises(ValueError, match="duplicate post-main"):
+        observer.after_main(pytest.ExitCode.OK)

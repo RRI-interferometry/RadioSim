@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import hashlib
 import json
@@ -539,3 +540,232 @@ def collection_exit_code(value: object) -> int:
     if type(value) not in (int, pytest.ExitCode):
         raise ValueError("collection status must be exact int or pytest.ExitCode")
     return int(cast(int, value))
+
+
+class _CollectionLifecycle:
+    """Unwired lifecycle observation only; cannot invoke pytest or publish a receipt."""
+
+    __name__ = "radiosim-authenticated-collection-observer"
+
+    def __init__(self) -> None:
+        self.session: Any = None
+        self.nodes: tuple[str, ...] | None = None
+        self.pre_cleanup_nodes: tuple[str, ...] | None = None
+        self.session_exit: int | None = None
+        self.finished = False
+        self.poisoned = False
+        self.events: list[str] = []
+        self.activity: dict[str, int] = dict.fromkeys(
+            ("protocol", "start", "setup", "call", "teardown"), 0
+        )
+        self.errors = 0
+        self.deselected = 0
+
+    @contextlib.contextmanager
+    def _observation(self) -> Any:
+        try:
+            yield
+        except BaseException:
+            self.poisoned = True
+            raise
+
+    def _require(self, condition: bool, message: str) -> None:
+        if not condition:
+            self.poisoned = True
+            raise ValueError(message)
+
+    def _event(self, name: str, expected: tuple[str, ...]) -> None:
+        self._require(tuple(self.events) == expected, "collection lifecycle order")
+        self.events.append(name)
+
+    def _nodes(self, session: Any) -> tuple[str, ...]:
+        with self._observation():
+            self._require(session is self.session, "collection session identity drift")
+            self._require(type(session.items) is list, "collection items storage type")
+            self._require(len(session.items) <= 50000, "collection item bound")
+            retained: list[str] = []
+            characters = 0
+            for item in session.items:
+                node = item.nodeid
+                self._require(
+                    type(node) is str and len(node) <= 32768,
+                    "collection node type/bound",
+                )
+                characters += len(node)
+                self._require(
+                    characters <= 2 * 1024 * 1024, "collection node text bound"
+                )
+                retained.append(node)
+            nodes = tuple(retained)
+            self._require(len(nodes) == len(set(nodes)), "duplicate collected node")
+            return nodes
+
+    def _first_wrapper(self, session: Any, name: str, *, first_call: bool) -> None:
+        with self._observation():
+            from pluggy._hooks import HookCaller
+
+            manager: Any = session.config.pluginmanager
+            self._require(
+                manager.get_plugin(self.__name__) is self, "observer registration drift"
+            )
+            hook_namespace = cast(dict[str, Any], vars(manager.hook))
+            caller = hook_namespace.get(name)
+            self._require(type(caller) is HookCaller, "collection hook caller type")
+            typed_caller = cast(HookCaller, caller)
+            raw = cast(object, cast(Any, typed_caller)._hookimpls)
+            self._require(
+                type(raw) is list and len(cast(list[object], raw)) <= 512,
+                "collection hook storage bound",
+            )
+            impls = cast(list[Any], raw)
+            ordered: tuple[Any, ...] = tuple(reversed(impls))
+            wrappers: tuple[Any, ...] = tuple(
+                impl
+                for impl in ordered
+                if bool(getattr(impl, "wrapper", False))
+                or bool(getattr(impl, "hookwrapper", False))
+            )
+            self._require(
+                bool(wrappers) and wrappers[0].plugin is self,
+                "collector is not outermost wrapper",
+            )
+            if first_call:
+                self._require(
+                    bool(ordered) and ordered[0].plugin is self,
+                    "collector is not first runtestloop entry",
+                )
+
+    @pytest.hookimpl(tryfirst=True)
+    def pytest_sessionstart(self, session: Any) -> None:
+        with self._observation():
+            self._require(
+                self.session is None and session.config.option.collectonly is True,
+                "invalid collection session start",
+            )
+            self.session = session
+            self._first_wrapper(session, "pytest_collection", first_call=False)
+            self._first_wrapper(session, "pytest_runtestloop", first_call=True)
+            self._first_wrapper(session, "pytest_sessionfinish", first_call=False)
+            self._event("session_started", ())
+
+    @pytest.hookimpl(wrapper=True, tryfirst=True)
+    def pytest_collection(self, session: Any) -> Any:
+        with self._observation():
+            self._first_wrapper(session, "pytest_collection", first_call=False)
+            result = cast(Any, (yield))
+            self._require(session is self.session, "collection session identity drift")
+            self._event("collection_returned", ("session_started",))
+            return result
+
+    @pytest.hookimpl(wrapper=True, tryfirst=True)
+    def pytest_runtestloop(self, session: Any) -> Any:
+        with self._observation():
+            self._first_wrapper(session, "pytest_runtestloop", first_call=True)
+            nodes = self._nodes(session)
+            self.nodes = nodes
+            self._event("runtestloop_seen", ("session_started", "collection_returned"))
+            result = cast(Any, (yield))
+            self._require(
+                self._nodes(session) == self.nodes,
+                "runtestloop changed collected nodes",
+            )
+            return result
+
+    @pytest.hookimpl(wrapper=True, tryfirst=True)
+    def pytest_sessionfinish(self, session: Any, exitstatus: int) -> Any:
+        with self._observation():
+            self._first_wrapper(session, "pytest_sessionfinish", first_call=False)
+            result = cast(Any, (yield))
+            nodes = self._nodes(session)
+            self._require(nodes == self.nodes, "sessionfinish changed collected nodes")
+            status = collection_exit_code(exitstatus)
+            self._require(
+                collection_exit_code(session.exitstatus) == status,
+                "pytest/session status mismatch",
+            )
+            self.pre_cleanup_nodes = nodes
+            self.session_exit = status
+            self._event(
+                "session_finished",
+                ("session_started", "collection_returned", "runtestloop_seen"),
+            )
+            return result
+
+    def pytest_collectreport(self, report: Any) -> None:
+        with self._observation():
+            self.errors += int(report.failed)
+
+    def pytest_deselected(self, items: Any) -> None:
+        with self._observation():
+            self.deselected += len(items)
+
+    def _body(self, phase: str) -> None:
+        self.activity[phase] += 1
+        self._require(False, "test activity forbidden: " + phase)
+
+    def pytest_runtest_protocol(self, item: Any, nextitem: Any) -> None:
+        self._body("protocol")
+
+    def pytest_runtest_logstart(self, nodeid: str, location: Any) -> None:
+        self._body("start")
+
+    def pytest_runtest_setup(self, item: Any) -> None:
+        self._body("setup")
+
+    def pytest_runtest_call(self, item: Any) -> None:
+        self._body("call")
+
+    def pytest_runtest_teardown(self, item: Any, nextitem: Any) -> None:
+        self._body("teardown")
+
+    def after_main(self, pytest_return: object) -> dict[str, Any]:
+        """Observe after actual main return; no source/cleanup-adapter acceptance."""
+        with self._observation():
+            self._require(not self.finished, "duplicate post-main observation")
+            self.finished = True
+            self._require(
+                not self.poisoned and not any(self.activity.values()),
+                "poisoned or active collection",
+            )
+            expected = (
+                "session_started",
+                "collection_returned",
+                "runtestloop_seen",
+                "session_finished",
+            )
+            self._require(tuple(self.events) == expected, "collection lifecycle order")
+            self._require(
+                type(self.pre_cleanup_nodes) is tuple
+                and self.pre_cleanup_nodes == self.nodes,
+                "missing or inconsistent completed pre-cleanup capture",
+            )
+            self._require(
+                self.nodes is not None and self._nodes(self.session) == self.nodes,
+                "post-main changed collected nodes",
+            )
+            self._require(
+                self.session.config._configured is False, "cleanup not complete"
+            )
+            status = collection_exit_code(pytest_return)
+            retained_status = collection_exit_code(self.session.exitstatus)
+            self._require(
+                type(self.session_exit) is int
+                and status == self.session_exit
+                and retained_status == self.session_exit,
+                "pytest/session status mismatch",
+            )
+            self._event("pytest_main_returned", expected)
+            return {
+                "nodes": self.nodes,
+                "pre_cleanup_nodes": self.pre_cleanup_nodes,
+                "pytest_return": status,
+                "session_exit": self.session_exit,
+                "events": tuple(self.events),
+                "activity": dict(self.activity),
+                "collection_errors": self.errors,
+                "deselected": self.deselected,
+                "receipt_ready": False,
+            }
+
+
+_ = _CollectionLifecycle
