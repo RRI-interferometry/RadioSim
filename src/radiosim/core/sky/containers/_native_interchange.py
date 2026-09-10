@@ -10,6 +10,7 @@ from numpy.typing import NDArray
 
 _PROFILE = "pyradiosky_1_1_0_theta_phi_v1"
 _DOMAIN = b"RADIOSIM_PYRADIOSKY_HEALPIX_PAYLOAD_V1\n"
+_TRANSFER_DOMAIN = b"RADIOSIM_NATIVE_PYRADIOSKY_TRANSFER_V1\n"
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,3 +189,54 @@ def import_declaration_bytes(
             "serialized_payload_sha256": serialized_payload_sha256,
         }
     )
+
+
+def transfer_record_bytes(
+    *,
+    parent_materialization_id: str,
+    input_payload_sha256: str,
+    output_payload_sha256: str,
+    parameters_sha256: str,
+) -> bytes:
+    """Encode the ten-field transfer record from already verified digest labels.
+
+    This primitive does not verify a graph. Its future consumer must pass actual
+    recomputed P1/E IDs and the basis-parameter digest after checking profile
+    joins, and compare supplied record bytes to this result before acceptance.
+    Operation endpoints are bound to the supplied payload digests.
+    """
+    labels = (
+        parent_materialization_id,
+        input_payload_sha256,
+        output_payload_sha256,
+        parameters_sha256,
+    )
+    for value in labels:
+        _require(
+            type(value) is str
+            and len(value) == 64
+            and all(c in "0123456789abcdef" for c in value),
+            "expected lowercase SHA256",
+        )
+    parent, incoming, outgoing, parameters = labels
+    record = {
+        "schema_version": "radiosim.native-pyradiosky-transfer.v1",
+        "component_kind": "healpix",
+        "input_profile": "radiosim_ne_iau_v1",
+        "output_profile": _PROFILE,
+        "coordinate_frame": "icrs",
+        "parent_materialization_id": parent,
+        "input_payload_sha256": incoming,
+        "output_payload_sha256": outgoing,
+        "operation": {
+            "kind": "basis_profile_conversion",
+            "input_sha256": incoming,
+            "output_sha256": outgoing,
+            "parameters_sha256": parameters,
+        },
+    }
+    encoded = _json(record)
+    record["transfer_id"] = hashlib.sha256(
+        _TRANSFER_DOMAIN + struct.pack("<Q", len(encoded)) + encoded
+    ).hexdigest()
+    return _json(record)

@@ -12,6 +12,7 @@ from radiosim.core.sky.containers._native_interchange import (
     SerializedNativePayload,
     bind_serialized_native,
     import_declaration_bytes,
+    transfer_record_bytes,
 )
 
 _WORDS = (
@@ -210,3 +211,88 @@ def test_import_declaration_refuses_noncanonical_digest(value: str) -> None:
             parent_materialization_id="33" * 32,
             serialized_payload_sha256="22" * 32,
         )
+
+
+def test_transfer_record_matches_independent_literal_bytes() -> None:
+    parent = "11" * 32
+    incoming = "22" * 32
+    outgoing = "33" * 32
+    parameters = "44" * 32
+    nine = {
+        "schema_version": "radiosim.native-pyradiosky-transfer.v1",
+        "component_kind": "healpix",
+        "input_profile": "radiosim_ne_iau_v1",
+        "output_profile": "pyradiosky_1_1_0_theta_phi_v1",
+        "coordinate_frame": "icrs",
+        "parent_materialization_id": parent,
+        "input_payload_sha256": incoming,
+        "output_payload_sha256": outgoing,
+        "operation": {
+            "kind": "basis_profile_conversion",
+            "input_sha256": incoming,
+            "output_sha256": outgoing,
+            "parameters_sha256": parameters,
+        },
+    }
+    encoded = json.dumps(
+        nine,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    preimage = (
+        b"RADIOSIM_NATIVE_PYRADIOSKY_TRANSFER_V1\n"
+        + struct.pack("<Q", len(encoded))
+        + encoded
+    )
+    transfer_id = hashlib.sha256(preimage).hexdigest()
+    expected = dict(nine)
+    expected["transfer_id"] = transfer_id
+    actual = transfer_record_bytes(
+        parent_materialization_id=parent,
+        input_payload_sha256=incoming,
+        output_payload_sha256=outgoing,
+        parameters_sha256=parameters,
+    )
+    assert actual == json.dumps(
+        expected,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    assert json.loads(actual)["operation"]["input_sha256"] == incoming
+    assert json.loads(actual)["operation"]["output_sha256"] == outgoing
+    # Symbolic digest-label oracle only; neither call authenticates a graph.
+    assert (
+        transfer_record_bytes(
+            parent_materialization_id="55" * 32,
+            input_payload_sha256=incoming,
+            output_payload_sha256=outgoing,
+            parameters_sha256=parameters,
+        )
+        != actual
+    )
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "parent_materialization_id",
+        "input_payload_sha256",
+        "output_payload_sha256",
+        "parameters_sha256",
+    ],
+)
+@pytest.mark.parametrize("value", ["A" * 64, "0" * 63, "g" * 64])
+def test_transfer_record_refuses_noncanonical_digest(field: str, value: str) -> None:
+    kwargs = {
+        "parent_materialization_id": "11" * 32,
+        "input_payload_sha256": "22" * 32,
+        "output_payload_sha256": "33" * 32,
+        "parameters_sha256": "44" * 32,
+    }
+    kwargs[field] = value
+    with pytest.raises(ValueError, match="lowercase SHA256"):
+        _ = transfer_record_bytes(**kwargs)
