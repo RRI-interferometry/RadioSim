@@ -601,6 +601,28 @@ This is local export-refusal evidence. It does not implement child
 serialization, a successful attached roundtrip, or native interoperability
 closure.
 
+Scientific beam composition is committed and pushed as
+`d94904dacfcb1f8cfc3dc6951fefc5ccc814ba89`. The 317-line additive validator
+(114 tool, 203 tests, zero removals) authenticates finite scientific beam
+ownership without phase joins or public-validator wiring. Round2 isolated
+import with `python -I` and round2-release scoped-Pyright `C1-R2-1` remain
+preserved and were not rerun. The typing-only successor assigns the unused
+`bytes` result of `_beam_composition_reframe` to `_`. Round3 first-failure
+gates then passed synthetic-controls, baseline, lint, format, strict, default
+and py312. Scoped Pyright stayed at 367 diagnostics with source-mapped
+equality. Both runtimes collected and passed exactly 143 cases with JUnit
+identity joins and no failures, errors or skips. Frozen executor manifest
+`67161cf941aefcd3e36599a24bdf48cbad00c078bcd6d6c72df8755c72bc03ba`
+received independent static ACCEPT
+`da66edc3aede1bb120cd1448363a9b22c816453ea65662e47e38ad3426f80fdb`
+and independent applied-result ACCEPT
+`df6db5ead333cbae5995f7d7efe6b5c6f8a1e2c750b0be7dbe5d7eea4df5524e`.
+root-completion SHA-256 is
+`9dc5a33ea67993cee6553cc4b0312d9f2f35925f646b0a44ff835cbf365ceacc`.
+This is local composition-validator evidence. It does not accept phase
+joins, public admission, SCI-004, native interoperability, exact-SHA CI,
+or PERF-001.
+
 L1 cleanup source policy has both independent
 ACCEPTs and root authentication of 139 members (3,897,293 bytes). The unexecuted
 config-probe round1 was rejected for roster, resource-bound and failure-receipt
@@ -682,9 +704,11 @@ across both passing runtime gates, with the same 367 scoped strict diagnostics.
 Its 234 additions include one type-only cast after the existing row guard;
 original 367-to-369 typing and packaging-collision stops remain preserved in
 `c1-beam-handler-candidate/`. Final evidence is in `round2-authored/`.
-The handler also remains unwired: assignment, instrument/phase joins and final
-beam composition are pending, as are the remaining C1 owners. These focused
-controls do not establish numerical beam qualification or admission.
+The handler remains unwired for assignment and instrument/phase joins.
+Scientific beam composition without those joins is now committed at
+`d94904dacfcb1f8cfc3dc6951fefc5ccc814ba89`. Phase joins, public-validator
+wiring, remaining C1 owners, numerical beam qualification and admission
+remain pending.
 
 The private, unwired native payload codec is committed at
 `5ed697ffdfe86efd57c349f0384c6adddfe669a6`. Identity tests at
