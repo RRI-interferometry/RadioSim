@@ -623,6 +623,27 @@ This is local composition-validator evidence. It does not accept phase
 joins, public admission, SCI-004, native interoperability, exact-SHA CI,
 or PERF-001.
 
+Native interchange A1 transport identity is committed and pushed as
+`57fb9f4141cce5e22b4b059896fd63c080a55624`. The 263-line additive primitive
+(155 production, 108 tests, zero removals) hashes finite little-endian
+endpoint words without public wiring. Round2 stopped at ruff I001
+(E-A1-R2-1,
+`62f05d475abb10db3c4bc57b86d6c51f3eb3859b54c57e90951e2fd13359d2d4`)
+and was not rerun. The isort-only successor removes the extra blank line
+after the import block. Round3 first-failure gates then passed
+helper_controls, baseline-apply, format, lint, diff, scope-strict,
+default and py312. Both runtimes collected and passed exactly one case
+with JUnit identity joins and no failures, errors or skips. Frozen gate
+manifest
+`9f837a6313a0721ea32b07a96a15d6acc05213bf53d86386d598373aea2f7566`
+received independent static ACCEPT
+`d89fea9d3901cfbd5e8a33dde08b9c4b03804bc24c9d89300ef9033488466429`
+and independent applied-result ACCEPT
+`19da4c4430c63968de160dbc37051d3491371c87dbd08424285b671ebd2d1ece`.
+This is local unwired transport-identity evidence. It does not implement
+child serialization, file roundtrip, native interoperability, SCI-004,
+exact-SHA CI, or PERF-001.
+
 L1 cleanup source policy has both independent
 ACCEPTs and root authentication of 139 members (3,897,293 bytes). The unexecuted
 config-probe round1 was rejected for roster, resource-bound and failure-receipt
