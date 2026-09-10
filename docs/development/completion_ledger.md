@@ -666,6 +666,32 @@ This is local unwired declaration-encoder evidence. It does not implement
 child serialization, file roundtrip, native interoperability, SCI-004,
 exact-SHA CI, or PERF-001.
 
+Writer-layout R2 captured the pinned pyradiosky 1.1.0 ICRS RING
+`Header/hpx_frame` inventory on both supported runtimes. Unused round1
+remains unused (prepare-check stop on a dirty tree; Homebrew 3.14 was
+not the coordinator). Context-refresh package manifest
+`32160c1046376517b46ed022dc1381c15af5642bf5f76255c855f28257f6c14a`
+received independent static ACCEPT
+`63dce44833372a8d1aebcd439aef9a83d3faf5ce1ef5447e7f21d8d38fc1a5b0`.
+Exclusive parent execution completed at clean
+`4d0e576701150e7869fd4227bb4b745e2efcf842` with
+`PASS_FINITE_WRITER_LAYOUT_ONLY` on both children and no RadioSim
+import. Both runtimes wrote the same 16920-byte skyh5
+`b94c6cbac70a49020fa451e4fb7cbecb78bc729c031f4d6707add3de625ed1d7`.
+The closed frame representation is group `/Header/hpx_frame` with empty
+attributes plus scalar dataset `/Header/hpx_frame/frame` dtype `|S4`
+bytes `69637273` (`icrs`) with empty attributes. Independent applied
+ACCEPT
+`c520e918a2cc40a232123baec57333ea03ec5c480b008e83617cd0d432c44d0c`
+and inventory ACCEPT
+`0d98e9df0d09f3f970ec0cc225d04c09d0a8cb5aa37eefef5104e5011f789b4f`
+pin inventory
+`50333d06a02df90d2f29dad78ce470a924a4d03dd5a41f0ec654583269c64eb3`.
+Separate decoder variants are not required for this first-lane fixture.
+This is a frozen producer-layout observation. It does not implement a
+closed file decoder, file import, native interoperability, SCI-004,
+exact-SHA CI, or PERF-001.
+
 L1 cleanup source policy has both independent
 ACCEPTs and root authentication of 139 members (3,897,293 bytes). The unexecuted
 config-probe round1 was rejected for roster, resource-bound and failure-receipt
