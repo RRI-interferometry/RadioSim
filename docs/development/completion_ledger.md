@@ -692,6 +692,24 @@ This is a frozen producer-layout observation. It does not implement a
 closed file decoder, file import, native interoperability, SCI-004,
 exact-SHA CI, or PERF-001.
 
+Native interchange A3 transfer-record encoder is committed and pushed as
+`e9b510270ca7131ef226c2246d3dc4af9ffa039c`. The 138-line additive
+primitive (52 production, 86 tests, zero removals) encodes the
+ten-field transfer record from already verified digest labels without
+authenticating a graph. Operation endpoints are bound to the supplied
+payload digests. Round1 first-failure gates then passed helper_controls,
+baseline-apply, format, lint, diff, scope-strict, default and py312.
+Both runtimes collected and passed exactly 29 cases with JUnit identity
+joins and no failures, errors or skips. Frozen gate manifest
+`79843a25e0b69d9bc5db6ba2471de9954d932edb1fbb9dac56b2b9443d807a44`
+received independent static ACCEPT
+`5115e81a95351d95034f7fd8b0bc8744c2d2ebbe72db5e38af4edc34dd057eb2`
+and independent applied-result ACCEPT
+`0146853e02e93478599f03d0e5ad4c404174fe4debdb0196ffc241161ffa1ae0`.
+This is local unwired transfer-record evidence. It does not implement a
+chain consumer, file roundtrip, native interoperability, SCI-004,
+exact-SHA CI, or PERF-001.
+
 L1 cleanup source policy has both independent
 ACCEPTs and root authentication of 139 members (3,897,293 bytes). The unexecuted
 config-probe round1 was rejected for roster, resource-bound and failure-receipt
