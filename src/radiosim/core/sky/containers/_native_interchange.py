@@ -2,8 +2,10 @@
 
 import hashlib
 import json
+import math
 import struct
 from dataclasses import dataclass
+from typing import TypeGuard
 
 import numpy as np
 from numpy.typing import NDArray
@@ -53,6 +55,10 @@ def _json(value: object) -> bytes:
 def _require(condition: bool, message: str) -> None:
     if not condition:
         raise ValueError(message)
+
+
+def _is_exact_tuple(value: object) -> TypeGuard[tuple[object, ...]]:
+    return type(value) is tuple
 
 
 def bind_serialized_native(value: SerializedNativePayload) -> SerializedPayloadBinding:
@@ -240,3 +246,67 @@ def transfer_record_bytes(
         _TRANSFER_DOMAIN + struct.pack("<Q", len(encoded)) + encoded
     ).hexdigest()
     return _json(record)
+
+
+def frequency_permutation_bytes(
+    *, source_indices: object, input_frequency_words: object
+) -> bytes:
+    """Encode the closed frequency-permutation parameters from actual labels.
+
+    This primitive does not permute arrays or authenticate a parent. The
+    consumer must pass the actual stable argsort and little-endian word hex
+    of the unsorted frequencies, then compare supplied parameter bytes to
+    this result before acceptance.
+    """
+    if not _is_exact_tuple(source_indices):
+        raise ValueError("expected exact index tuple")
+    if not _is_exact_tuple(input_frequency_words):
+        raise ValueError("expected exact word tuple")
+    count = len(source_indices)
+    _require(count == len(input_frequency_words), "permutation length differs")
+    _require(1 <= count <= 1024, "endpoint dimension limit")
+    indices: list[int] = []
+    for index in source_indices:
+        if type(index) is not int:
+            raise ValueError("invalid source index")
+        _require(0 <= index < count, "invalid source index")
+        indices.append(index)
+    checked = tuple(indices)
+    _require(len(set(checked)) == count, "source indices are not a bijection")
+    values: list[float] = []
+    words: list[str] = []
+    for word in input_frequency_words:
+        if type(word) is not str:
+            raise ValueError("expected lowercase <f8 word hex")
+        _require(
+            len(word) == 16
+            and all(character in "0123456789abcdef" for character in word),
+            "expected lowercase <f8 word hex",
+        )
+        value = struct.unpack("<d", bytes.fromhex(word))[0]
+        _require(math.isfinite(value) and value > 0, "invalid frequencies")
+        values.append(value)
+        words.append(word)
+    expected = tuple(sorted(range(count), key=values.__getitem__))
+    _require(checked == expected, "source indices are not the stable sort")
+    output_words = [words[index] for index in checked]
+    output_values = [values[index] for index in checked]
+    _require(
+        all(
+            left < right
+            for left, right in zip(output_values, output_values[1:], strict=False)
+        ),
+        "frequencies not strictly sorted",
+    )
+    return _json(
+        {
+            "schema_version": "radiosim.native-frequency-permutation.v1",
+            "algorithm": "stable_frequency_sort_v1",
+            "axis": "frequency",
+            "source_indices": list(checked),
+            "input_frequency_words": list(words),
+            "output_frequency_words": output_words,
+            "pixel_order": "preserve_physical_id_sequence",
+            "arithmetic": "none",
+        }
+    )

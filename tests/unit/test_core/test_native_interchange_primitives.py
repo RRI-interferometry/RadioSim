@@ -11,6 +11,7 @@ import pytest
 from radiosim.core.sky.containers._native_interchange import (
     SerializedNativePayload,
     bind_serialized_native,
+    frequency_permutation_bytes,
     import_declaration_bytes,
     transfer_record_bytes,
 )
@@ -296,3 +297,80 @@ def test_transfer_record_refuses_noncanonical_digest(field: str, value: str) -> 
     kwargs[field] = value
     with pytest.raises(ValueError, match="lowercase SHA256"):
         _ = transfer_record_bytes(**kwargs)
+
+
+def test_frequency_permutation_matches_independent_literal_bytes() -> None:
+    frequencies = (120e6, 80e6, 100e6)
+    words = tuple(struct.pack("<d", value).hex() for value in frequencies)
+    indices = (1, 2, 0)
+    expected = {
+        "schema_version": "radiosim.native-frequency-permutation.v1",
+        "algorithm": "stable_frequency_sort_v1",
+        "axis": "frequency",
+        "source_indices": [1, 2, 0],
+        "input_frequency_words": list(words),
+        "output_frequency_words": [words[1], words[2], words[0]],
+        "pixel_order": "preserve_physical_id_sequence",
+        "arithmetic": "none",
+    }
+    actual = frequency_permutation_bytes(
+        source_indices=indices, input_frequency_words=words
+    )
+    assert actual == json.dumps(
+        expected,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    identity = tuple(struct.pack("<d", value).hex() for value in (80e6, 100e6, 120e6))
+    assert (
+        frequency_permutation_bytes(
+            source_indices=(0, 1, 2), input_frequency_words=identity
+        )
+        != actual
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "bool_index",
+        "duplicate_frequency",
+        "wrong_permutation",
+        "uppercase_hex",
+        "short_hex",
+        "frequency_nan",
+        "frequency_nonpositive",
+        "empty",
+        "length_mismatch",
+    ],
+)
+def test_frequency_permutation_refuses_invalid_actual_input(mutation: str) -> None:
+    words = tuple(struct.pack("<d", value).hex() for value in (120e6, 80e6, 100e6))
+    indices: object = (1, 2, 0)
+    payload: object = words
+    if mutation == "bool_index":
+        indices = (True, 2, 0)
+    elif mutation == "duplicate_frequency":
+        payload = (words[0], words[0], words[2])
+        indices = (0, 1, 2)
+    elif mutation == "wrong_permutation":
+        indices = (2, 1, 0)
+    elif mutation == "uppercase_hex":
+        payload = (words[0].upper(), words[1], words[2])
+    elif mutation == "short_hex":
+        payload = (words[0][:15], words[1], words[2])
+    elif mutation == "frequency_nan":
+        payload = (struct.pack("<d", float("nan")).hex(), words[1], words[2])
+    elif mutation == "frequency_nonpositive":
+        payload = (struct.pack("<d", 0.0).hex(), words[1], words[2])
+    elif mutation == "empty":
+        indices = ()
+        payload = ()
+    else:
+        payload = words[:2]
+    with pytest.raises(ValueError):
+        _ = frequency_permutation_bytes(
+            source_indices=indices, input_frequency_words=payload
+        )
