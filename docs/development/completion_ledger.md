@@ -787,6 +787,26 @@ This is local unwired sorted-child factory evidence. It does not
 implement file roundtrip, native interoperability, SCI-004, exact-SHA
 CI, or PERF-001.
 
+Native interchange A8 owner dispatch is committed and pushed as
+`aec6b2f39a7b68cef9a2306e8e018d7b17767a39`. The 343/20 change (178/20
+production, 165 tests) adds `require_native_materialization`, which
+dispatches identity evidence through `require_native_identity` and
+replays a depth-1 sorted child against an inverse-permuted unbound
+parent. HealpixData accepts exact identity or chain evidence; existing
+attachments are still preserved, not reissued. Round1 and round2 first
+failures remain at scope-strict. Round3 first-failure gates then passed
+helper_controls, baseline-apply, format, lint, diff, scope-strict,
+default and py312. Both runtimes collected and passed exactly 84 cases
+with JUnit identity joins and no failures, errors or skips. Frozen gate
+manifest
+`6e47a08c1e93ce7ff71773c1603e0eca6ea1f7b49d762204cf252f0ff92043b5`
+received independent static ACCEPT
+`8aaae4b42fd9c63ddf6a983e199347b076d9caeebfeec3dfe3cd6c4fbfcf67bf`
+and independent applied-result ACCEPT
+`70823c03e43761e970b850cd96127b4f233a8b2f77e97522a8f097a4b5b31328`.
+This is local owner-dispatch evidence. It does not implement file
+roundtrip, native interoperability, SCI-004, exact-SHA CI, or PERF-001.
+
 L1 cleanup source policy has both independent
 ACCEPTs and root authentication of 139 members (3,897,293 bytes). The unexecuted
 config-probe round1 was rejected for roster, resource-bound and failure-receipt
