@@ -846,6 +846,26 @@ This is local U-sign adaptation evidence. It does not implement file
 roundtrip, native interoperability, SCI-004, exact-SHA CI, or
 PERF-001.
 
+Native interchange A11 theta/phi Stokes pack is committed and pushed as
+`bfb7d4c4cbe57ada99ee00eab405935e05a3ed92`. The 320/1 change (141/1
+production, 179 tests) adds `pack_sorted_theta_phi_stokes`, which
+stacks already sign-adapted sorted I/Q/U/V into a locked `[4, F, N]`
+`<f8` tensor on `SerializedNativePayload` and validates it through
+`bind_serialized_native`. It does not wrap pyradiosky, write HDF5, or
+replace the attached export refusal. Round1 first-failure gates then
+passed helper_controls, baseline-apply, format, lint, diff,
+scope-strict, default and py312. Both runtimes collected and passed
+exactly 92 cases with JUnit identity joins and no failures, errors or
+skips. Frozen gate manifest
+`49c169c61bd7707b1d93fa4e4eb1c982549689cf0d2b496325ae725f80ee63b7`
+received independent static ACCEPT
+`db3f0227616fcd4125c1aab75b889a271f86186b0232f21531914091ec2952f6`
+and independent applied-result ACCEPT
+`6298bee3a3ffd19c5821e6aaa98aed8a7cc2859e5a54b7a447eeec9bd315172f`.
+This is local theta/phi Stokes pack evidence. It does not implement
+file roundtrip, native interoperability, SCI-004, exact-SHA CI, or
+PERF-001.
+
 L1 cleanup source policy has both independent
 ACCEPTs and root authentication of 139 members (3,897,293 bytes). The unexecuted
 config-probe round1 was rejected for roster, resource-bound and failure-receipt
