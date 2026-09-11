@@ -4,6 +4,7 @@ import hashlib
 import json
 import struct
 from dataclasses import replace
+from typing import Any
 
 import numpy as np
 import pytest
@@ -20,8 +21,10 @@ from radiosim.core.sky.containers._native_interchange import (
     frequency_permutation_bytes,
     import_declaration_bytes,
     pack_sorted_theta_phi_stokes,
+    require_bound_theta_phi_endpoint,
     require_native_materialization,
     transfer_record_bytes,
+    wrap_packed_theta_phi_stokes,
 )
 from radiosim.core.sky.containers._polarization_materialization import (
     complete_native_identity,
@@ -34,6 +37,11 @@ from radiosim.core.sky.containers.point import TangentPolarizationFrame
 from radiosim.core.sky.containers.polarization_materialization import (
     PolarizationMaterializationEvidence,
 )
+
+
+def _named(owner: object, name: str) -> Any:
+    return getattr(owner, name)
+
 
 _WORDS = (
     1.0,
@@ -1327,3 +1335,152 @@ def test_theta_phi_pack_refuses_invalid_actual_input(mutation: str) -> None:
         target = unsorted
     with pytest.raises(ValueError):
         _ = pack_sorted_theta_phi_stokes(target)
+
+
+def _theta_phi_payload() -> SerializedNativePayload:
+    arrays = (
+        np.array([80e6, 100e6, 120e6], dtype="<f8"),
+        np.array([4, 0, 9], dtype="<i8"),
+        np.array(
+            [
+                [[11.0, 21.0, 31.0], [12.0, 22.0, 32.0], [10.0, 20.0, 30.0]],
+                [[2.1, 0.1, 1.1], [2.2, 0.2, 1.2], [2.0, 0.0, 1.0]],
+                [[-3.1, 1.1, -0.6], [-3.2, 1.2, -0.7], [-3.0, 1.0, -0.5]],
+                [[4.1, 5.1, 6.1], [4.2, 5.2, 6.2], [4.0, 5.0, 6.0]],
+            ],
+            dtype="<f8",
+        ),
+    )
+    for array in arrays:
+        array.flags.writeable = False
+    return SerializedNativePayload(
+        1,
+        *arrays,
+        "pyradiosky_1_1_0_theta_phi_v1",
+        "icrs",
+        "ring",
+        "healpix",
+        "full",
+        "Hz",
+        "K",
+        "rayleigh-jeans",
+    )
+
+
+def test_theta_phi_wrap_matches_independent_literals() -> None:
+    payload = _theta_phi_payload()
+    parent_freq = payload.frequencies.tobytes()
+    parent_ids = payload.pixel_ids.tobytes()
+    parent_stokes = payload.stokes.tobytes()
+    owner = wrap_packed_theta_phi_stokes(payload)
+    expected_stokes = np.array(
+        [
+            [[11.0, 21.0, 31.0], [12.0, 22.0, 32.0], [10.0, 20.0, 30.0]],
+            [[2.1, 0.1, 1.1], [2.2, 0.2, 1.2], [2.0, 0.0, 1.0]],
+            [[-3.1, 1.1, -0.6], [-3.2, 1.2, -0.7], [-3.0, 1.0, -0.5]],
+            [[4.1, 5.1, 6.1], [4.2, 5.2, 6.2], [4.0, 5.0, 6.0]],
+        ],
+        dtype="<f8",
+    )
+    expected_freq = np.array([80e6, 100e6, 120e6], dtype="<f8")
+    expected_ids = np.array([4, 0, 9], dtype="<i8")
+    assert type(owner).__module__ == "pyradiosky.skymodel"
+    assert type(owner).__name__ == "SkyModel"
+    observed_stokes = _named(_named(owner, "stokes"), "value")
+    observed_freq = _named(_named(owner, "freq_array"), "value")
+    observed_ids = _named(owner, "hpx_inds")
+    assert observed_stokes.tobytes() == expected_stokes.tobytes()
+    assert observed_freq.tobytes() == expected_freq.tobytes()
+    assert observed_ids.tobytes() == expected_ids.tobytes()
+    assert (
+        observed_stokes[:, 2, 0].tobytes()
+        == np.array([10.0, 2.0, -3.0, 4.0], dtype="<f8").tobytes()
+    )
+    assert _named(owner, "nside") == 1
+    assert _named(owner, "hpx_order") == "ring"
+    assert _named(owner, "frame") == "icrs"
+    assert _named(owner, "component_type") == "healpix"
+    assert _named(owner, "spectral_type") == "full"
+    metadata = {
+        "schema_version": "radiosim.pyradiosky-healpix-payload-metadata.v1",
+        "profile": "pyradiosky_1_1_0_theta_phi_v1",
+        "component_type": "healpix",
+        "spectral_type": "full",
+        "coordinate_frame": "icrs",
+        "ordering": "ring",
+        "nside": 1,
+        "units": {"frequencies": "Hz", "pixel_ids": "1", "stokes": "K"},
+        "brightness_conversion": "rayleigh-jeans",
+        "stokes_axis_order": ["I", "Q", "U", "V"],
+        "arrays": [
+            {"name": "frequencies", "dtype": "<f8", "shape": [3], "byte_count": 24},
+            {"name": "pixel_ids", "dtype": "<i8", "shape": [3], "byte_count": 24},
+            {"name": "stokes", "dtype": "<f8", "shape": [4, 3, 3], "byte_count": 288},
+        ],
+    }
+    encoded = json.dumps(metadata, sort_keys=True, separators=(",", ":")).encode()
+    preimage = b"RADIOSIM_PYRADIOSKY_HEALPIX_PAYLOAD_V1\n"
+    for value in (
+        encoded,
+        expected_freq.tobytes(),
+        expected_ids.tobytes(),
+        expected_stokes.tobytes(),
+    ):
+        preimage += struct.pack("<Q", len(value)) + value
+    binding = bind_serialized_native(payload)
+    assert binding.metadata_json == encoded
+    assert binding.payload_sha256 == hashlib.sha256(preimage).hexdigest()
+    require_bound_theta_phi_endpoint(owner, payload)
+    assert payload.frequencies.tobytes() == parent_freq
+    assert payload.pixel_ids.tobytes() == parent_ids
+    assert payload.stokes.tobytes() == parent_stokes
+    assert not np.shares_memory(observed_stokes, payload.stokes)
+    assert not np.shares_memory(observed_freq, payload.frequencies)
+    assert not np.shares_memory(observed_ids, payload.pixel_ids)
+
+
+def test_theta_phi_bound_endpoint_refuses_constructor_mutation() -> None:
+    payload = _theta_phi_payload()
+    parent_stokes = payload.stokes.tobytes()
+    owner = wrap_packed_theta_phi_stokes(payload)
+    _named(_named(owner, "stokes"), "value")[2, 2, 0] = 3.0
+    with pytest.raises(ValueError):
+        require_bound_theta_phi_endpoint(owner, payload)
+    assert payload.stokes.tobytes() == parent_stokes
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "bool_payload",
+        "profile",
+        "context",
+        "galactic",
+        "nest",
+        "frequency_order",
+        "writeable",
+    ],
+)
+def test_theta_phi_wrap_refuses_invalid_actual_input(mutation: str) -> None:
+    payload = _theta_phi_payload()
+    target: object = payload
+    if mutation == "bool_payload":
+        target = True
+    elif mutation == "profile":
+        target = replace(payload, profile="radiosim_ne_iau_v1")
+    elif mutation == "context":
+        target = replace(payload, brightness_conversion="planck")
+    elif mutation == "galactic":
+        target = replace(payload, coordinate_frame="galactic")
+    elif mutation == "nest":
+        target = replace(payload, ordering="nest")
+    elif mutation == "frequency_order":
+        array = payload.frequencies.copy()
+        array[:] = [120e6, 100e6, 80e6]
+        array.flags.writeable = False
+        target = replace(payload, frequencies=array)
+    else:
+        array = payload.stokes.copy()
+        target = replace(payload, stokes=array)
+    with pytest.raises(ValueError):
+        _ = wrap_packed_theta_phi_stokes(target)

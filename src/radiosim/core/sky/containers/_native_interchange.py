@@ -1,11 +1,12 @@
-"""Unwired finite transport primitives, sorted-child consumer, frequency-sorted copy, U-sign adaptation, and theta/phi pack; no export release."""
+"""Unwired finite transport primitives, sorted-child consumer, frequency-sorted copy, U-sign adaptation, theta/phi pack, and pyradiosky wrap; no export release."""
 
 import hashlib
+import importlib
 import json
 import math
 import struct
 from dataclasses import dataclass
-from typing import TypeGuard
+from typing import Any, TypeGuard
 
 import numpy as np
 from numpy.typing import NDArray
@@ -947,6 +948,138 @@ def pack_sorted_theta_phi_stokes(owner: object) -> SerializedNativePayload:
         "copy shares parent storage",
     )
     return payload
+
+
+def _load_attr(module_name: str, name: str) -> Any:
+    return getattr(importlib.import_module(module_name), name)
+
+
+def _named(owner: object, name: str) -> Any:
+    return getattr(owner, name)
+
+
+def require_bound_theta_phi_endpoint(owner: object, payload: object) -> None:
+    """Re-read an actual pyradiosky owner and require exact packed E words.
+
+    This does not wrap a new model, write HDF5, or publish export.
+    """
+    if type(payload) is not SerializedNativePayload:
+        raise ValueError("expected exact endpoint type")
+    binding = bind_serialized_native(payload)
+    if type(owner) is not _load_attr("pyradiosky.skymodel", "SkyModel"):
+        raise ValueError("expected pyradiosky SkyModel")
+    kelvin = _load_attr("astropy.units", "K")
+    hertz = _load_attr("astropy.units", "Hz")
+    stokes = _named(owner, "stokes")
+    frequencies = _named(owner, "freq_array")
+    pixel_ids = _named(owner, "hpx_inds")
+    _require(_named(stokes, "unit") == kelvin, "expected Kelvin Stokes")
+    _require(_named(frequencies, "unit") == hertz, "expected Hz frequencies")
+    stokes_value = _named(stokes, "value")
+    frequency_value = _named(frequencies, "value")
+    if type(stokes_value) is not np.ndarray:
+        raise ValueError("expected exact ndarray")
+    if type(frequency_value) is not np.ndarray:
+        raise ValueError("expected exact ndarray")
+    if type(pixel_ids) is not np.ndarray:
+        raise ValueError("expected exact ndarray")
+    _require(stokes_value.dtype.str == "<f8", "constructor changed dtype")
+    _require(frequency_value.dtype.str == "<f8", "constructor changed dtype")
+    _require(pixel_ids.dtype.str == "<i8", "constructor changed dtype")
+    _require(_named(owner, "nside") == payload.nside, "constructor changed nside")
+    _require(_named(owner, "hpx_order") == "ring", "constructor changed ordering")
+    _require(
+        _named(owner, "component_type") == "healpix",
+        "constructor changed component type",
+    )
+    _require(
+        _named(owner, "spectral_type") == "full", "constructor changed spectral type"
+    )
+    _require(_named(owner, "frame") == "icrs", "constructor changed frame")
+    _require(
+        stokes_value.tobytes() == payload.stokes.tobytes(),
+        "constructor changed Stokes words",
+    )
+    _require(
+        frequency_value.tobytes() == payload.frequencies.tobytes(),
+        "constructor changed frequency words",
+    )
+    _require(
+        pixel_ids.tobytes() == payload.pixel_ids.tobytes(),
+        "constructor changed pixel IDs",
+    )
+    rebound = SerializedNativePayload(
+        payload.nside,
+        _lock(_copy_f64le(frequency_value)),
+        _lock(_copy_i8le(pixel_ids)),
+        _lock(_copy_f64le(stokes_value)),
+        payload.profile,
+        payload.coordinate_frame,
+        payload.ordering,
+        payload.component_type,
+        payload.spectral_type,
+        payload.frequency_unit,
+        payload.stokes_unit,
+        payload.brightness_conversion,
+    )
+    observed = bind_serialized_native(rebound)
+    _require(observed.payload_sha256 == binding.payload_sha256, "bound digest differs")
+    _require(observed.metadata_json == binding.metadata_json, "bound metadata differs")
+
+
+def wrap_packed_theta_phi_stokes(payload: object) -> object:
+    """Construct actual pyradiosky 1.1.0 owner and bind its E endpoint.
+
+    Packed payload arrays are not mutated. This does not create a transfer
+    wrapper, write HDF5, or replace the attached export refusal.
+    """
+    if type(payload) is not SerializedNativePayload:
+        raise ValueError("expected exact endpoint type")
+    binding = bind_serialized_native(payload)
+    parent_words = (
+        payload.frequencies.tobytes(),
+        payload.pixel_ids.tobytes(),
+        payload.stokes.tobytes(),
+    )
+    frequencies = _copy_f64le(payload.frequencies)
+    pixel_ids = _copy_i8le(payload.pixel_ids)
+    stokes = _copy_f64le(payload.stokes)
+    sky_model = _load_attr("pyradiosky.skymodel", "SkyModel")
+    owner = sky_model(
+        nside=payload.nside,
+        hpx_order="ring",
+        hpx_inds=pixel_ids,
+        stokes=stokes * _load_attr("astropy.units", "K"),
+        spectral_type="full",
+        freq_array=frequencies * _load_attr("astropy.units", "Hz"),
+        component_type="healpix",
+        frame=_load_attr("astropy.coordinates", "ICRS")(),
+        history="RadioSim native theta/phi endpoint",
+    )
+    require_bound_theta_phi_endpoint(owner, payload)
+    _require(
+        (
+            payload.frequencies.tobytes(),
+            payload.pixel_ids.tobytes(),
+            payload.stokes.tobytes(),
+        )
+        == parent_words,
+        "parent mutated",
+    )
+    observed_stokes = _named(_named(owner, "stokes"), "value")
+    observed_freq = _named(_named(owner, "freq_array"), "value")
+    observed_ids = _named(owner, "hpx_inds")
+    _require(
+        not np.shares_memory(observed_stokes, payload.stokes)
+        and not np.shares_memory(observed_freq, payload.frequencies)
+        and not np.shares_memory(observed_ids, payload.pixel_ids),
+        "copy shares parent storage",
+    )
+    _require(
+        bind_serialized_native(payload).payload_sha256 == binding.payload_sha256,
+        "parent mutated",
+    )
+    return owner
 
 
 def _permutation_source_indices(permutation: bytes) -> tuple[int, ...]:
