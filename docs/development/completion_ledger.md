@@ -710,6 +710,27 @@ This is local unwired transfer-record evidence. It does not implement a
 chain consumer, file roundtrip, native interoperability, SCI-004,
 exact-SHA CI, or PERF-001.
 
+Native interchange A4 frequency-permutation encoder is committed and
+pushed as `3af70234223ab7db4e591a1f77240817b96c9953`. The 148-line
+additive primitive (70 production, 78 tests, zero removals) encodes
+closed eight-field frequency-permutation parameters from actual
+stable-argsort labels without permuting arrays or authenticating a
+parent. Unused R1 through R4 remain unused: R1 stopped at scoped
+Pyright, R2 at `tuple[Unknown, ...]`, R3 at `zip(..., strict=True)`,
+and R4 at lint B905. The successor names `zip(..., strict=False)`.
+Round5 first-failure gates then passed helper_controls, baseline-apply,
+format, lint, diff, scope-strict, default and py312. Both runtimes
+collected and passed exactly 39 cases with JUnit identity joins and no
+failures, errors or skips. Frozen gate manifest
+`01d92aed562973c7ca52168711f37e6d1e271681a35158983a018f7723fa572e`
+received independent static ACCEPT
+`7b7982eb44fe26e7be5a6ab338a60ae6da97798d907030b6b604123b9700d512`
+and independent applied-result ACCEPT
+`b194921d90466e5a6fb8732c7f91e54c4a1925bff116e6adf275d35bc13824db`.
+This is local unwired frequency-permutation encoder evidence. It does
+not implement a chain consumer, file roundtrip, native
+interoperability, SCI-004, exact-SHA CI, or PERF-001.
+
 L1 cleanup source policy has both independent
 ACCEPTs and root authentication of 139 members (3,897,293 bytes). The unexecuted
 config-probe round1 was rejected for roster, resource-bound and failure-receipt
