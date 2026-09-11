@@ -12,6 +12,7 @@ from radiosim.core.sky.containers._native_interchange import (
     SerializedNativePayload,
     basis_profile_conversion_bytes,
     bind_serialized_native,
+    export_declaration_bytes,
     frequency_permutation_bytes,
     import_declaration_bytes,
     transfer_record_bytes,
@@ -445,3 +446,59 @@ def test_basis_profile_conversion_refuses_invalid_actual_input(mutation: str) ->
         payload = "export "
     with pytest.raises(ValueError):
         _ = basis_profile_conversion_bytes(direction=payload)
+
+
+def test_export_declaration_matches_independent_literal_bytes() -> None:
+    expected = {
+        "schema_version": "radiosim.native-export-declaration.v1",
+        "parent_materialization_id": "33" * 32,
+        "source_profile": "radiosim_ne_iau_v1",
+        "output_profile": "pyradiosky_1_1_0_theta_phi_v1",
+        "coordinate_frame": "icrs",
+    }
+    actual = export_declaration_bytes(parent_materialization_id="33" * 32)
+    assert actual == json.dumps(
+        expected,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    assert (
+        hashlib.sha256(actual).hexdigest()
+        == "30f90656df07d32a1bac2f10a849d2d02df34c60db68c7731bcc8305dc840cbb"
+    )
+    # Symbolic digest-label oracle only; neither call authenticates a graph.
+    assert export_declaration_bytes(parent_materialization_id="11" * 32) != actual
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "bool_parent",
+        "uppercase",
+        "short",
+        "invalid_hex",
+        "bytes_parent",
+        "empty",
+        "whitespace",
+    ],
+)
+def test_export_declaration_refuses_invalid_actual_input(mutation: str) -> None:
+    payload: object = "33" * 32
+    if mutation == "bool_parent":
+        payload = True
+    elif mutation == "uppercase":
+        payload = "A" * 64
+    elif mutation == "short":
+        payload = "0" * 63
+    elif mutation == "invalid_hex":
+        payload = "g" * 64
+    elif mutation == "bytes_parent":
+        payload = b"33" * 32
+    elif mutation == "empty":
+        payload = ""
+    else:
+        payload = "33" * 32 + " "
+    with pytest.raises(ValueError):
+        _ = export_declaration_bytes(parent_materialization_id=payload)

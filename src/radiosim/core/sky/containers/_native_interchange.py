@@ -162,6 +162,31 @@ def bind_serialized_native(value: SerializedNativePayload) -> SerializedPayloadB
     return SerializedPayloadBinding(metadata, digest.hexdigest(), total)
 
 
+def export_declaration_bytes(*, parent_materialization_id: object) -> bytes:
+    """Encode the fixed sorted-child export declaration from a parent ID.
+
+    This primitive does not verify a graph. Its future consumer must pass the
+    actual recomputed P0 materialization ID after checking identity replay,
+    and compare supplied declaration bytes to this result before acceptance.
+    """
+    if type(parent_materialization_id) is not str:
+        raise ValueError("expected lowercase SHA256")
+    _require(
+        len(parent_materialization_id) == 64
+        and all(c in "0123456789abcdef" for c in parent_materialization_id),
+        "expected lowercase SHA256",
+    )
+    return _json(
+        {
+            "schema_version": "radiosim.native-export-declaration.v1",
+            "parent_materialization_id": parent_materialization_id,
+            "source_profile": "radiosim_ne_iau_v1",
+            "output_profile": _PROFILE,
+            "coordinate_frame": "icrs",
+        }
+    )
+
+
 def import_declaration_bytes(
     *, transfer_id: str, parent_materialization_id: str, serialized_payload_sha256: str
 ) -> bytes:
