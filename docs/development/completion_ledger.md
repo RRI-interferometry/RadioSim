@@ -807,6 +807,26 @@ and independent applied-result ACCEPT
 This is local owner-dispatch evidence. It does not implement file
 roundtrip, native interoperability, SCI-004, exact-SHA CI, or PERF-001.
 
+Native interchange A9 frequency-sorted copy is committed and pushed as
+`f00df14a40c7b140aeb4da40d988df3ec3a62719`. The 252/1 change (122/1
+production, 130 tests) adds `copy_frequency_sorted_healpix`, which
+copies ICRS RING Rayleigh-Jeans Stokes and frequency axes into stable
+frequency order on a new unbound HealpixData without mutating the
+parent. It does not attach evidence, pack a theta/phi tensor, wrap
+pyradiosky, or replace the attached export refusal. Round1
+first-failure gates then passed helper_controls, baseline-apply,
+format, lint, diff, scope-strict, default and py312. Both runtimes
+collected and passed exactly 75 cases with JUnit identity joins and no
+failures, errors or skips. Frozen gate manifest
+`4fa28d36e739cba7e64d03b2b4faec3184530a6a2a6591482e100305112bfd54`
+received independent static ACCEPT
+`9f44941158d07abdccdf688a0608725a899a92ad8304d42c2339ae7e5235b179`
+and independent applied-result ACCEPT
+`9bb463d8319459056fe8459c9fac897859f668e6e2c4263c7f09010b85d707a4`.
+This is local frequency-sorted copy evidence. It does not implement
+file roundtrip, native interoperability, SCI-004, exact-SHA CI, or
+PERF-001.
+
 L1 cleanup source policy has both independent
 ACCEPTs and root authentication of 139 members (3,897,293 bytes). The unexecuted
 config-probe round1 was rejected for roster, resource-bound and failure-receipt
