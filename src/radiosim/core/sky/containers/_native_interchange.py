@@ -1,4 +1,4 @@
-"""Unwired finite transport primitives, sorted-child consumer, and frequency-sorted copy; no export release."""
+"""Unwired finite transport primitives, sorted-child consumer, frequency-sorted copy, and U-sign adaptation; no export release."""
 
 import hashlib
 import json
@@ -670,6 +670,143 @@ def copy_frequency_sorted_healpix(owner: object) -> HealpixData:
         "copy shares parent storage",
     )
     return copied
+
+
+def _copy_f64le(array: np.ndarray) -> np.ndarray:
+    copied = np.frombuffer(bytes(array.tobytes()), dtype="<f8").reshape(array.shape)
+    return np.ascontiguousarray(copied)
+
+
+def adapt_sorted_healpix_u_sign(owner: object) -> HealpixData:
+    """Negate U on an already frequency-sorted copy for theta/phi export.
+
+    I, Q, V, frequencies and physical IDs stay byte-identical. Parent arrays
+    are not mutated. The result is unbound. This does not pack a tensor,
+    wrap pyradiosky, or publish export.
+    """
+    if not _is_healpix(owner):
+        raise ValueError("expected HealpixData")
+    if owner.coordinate_frame != "icrs":
+        raise ValueError("expected icrs owner")
+    if owner.ordering != "ring":
+        raise ValueError("expected ring owner")
+    if owner.tangent_polarization_frame is not None:
+        raise ValueError("copy must stay unbound")
+    if owner.polarization_materialization is not None:
+        raise ValueError("copy must stay unbound")
+    if (
+        type(owner.i_unit) is not str
+        or owner.i_unit != "K"
+        or type(owner.q_unit) is not str
+        or owner.q_unit != "K"
+        or type(owner.u_unit) is not str
+        or owner.u_unit != "K"
+        or type(owner.v_unit) is not str
+        or owner.v_unit != "K"
+    ):
+        raise ValueError("stored units must be K, including absent components")
+    if (
+        owner.i_brightness_conversion != "rayleigh-jeans"
+        or owner.q_brightness_conversion != "rayleigh-jeans"
+        or owner.u_brightness_conversion != "rayleigh-jeans"
+        or owner.v_brightness_conversion != "rayleigh-jeans"
+    ):
+        raise ValueError("sorted child requires rayleigh-jeans")
+    maps = owner.maps
+    q_maps = owner.q_maps
+    u_maps = owner.u_maps
+    v_maps = owner.v_maps
+    frequencies = owner.frequencies
+    pixel_ids = owner.hpx_inds
+    if q_maps is None or u_maps is None or v_maps is None:
+        raise ValueError("sorted child requires all Stokes components")
+    if pixel_ids is None:
+        raise ValueError("sorted child requires explicit pixel IDs")
+    arrays = (maps, q_maps, u_maps, v_maps, frequencies)
+    for array in arrays:
+        _require(type(array) is np.ndarray, "expected exact ndarray")
+        _require(array.dtype.str == "<f8", "unsupported endpoint dtype")
+        _require(
+            not array.flags.writeable and array.flags.c_contiguous,
+            "readonly C owner required",
+        )
+    _require(type(pixel_ids) is np.ndarray, "expected exact ndarray")
+    _require(pixel_ids.dtype.str == "<i8", "unsupported endpoint dtype")
+    _require(
+        not pixel_ids.flags.writeable and pixel_ids.flags.c_contiguous,
+        "readonly C owner required",
+    )
+    blob = bytes(frequencies.tobytes())
+    words = tuple(blob[index : index + 8].hex() for index in range(0, len(blob), 8))
+    values = [struct.unpack("<d", bytes.fromhex(word))[0] for word in words]
+    indices = tuple(sorted(range(len(values)), key=values.__getitem__))
+    _require(indices == tuple(range(len(values))), "frequencies not strictly sorted")
+    _ = frequency_permutation_bytes(source_indices=indices, input_frequency_words=words)
+    _ = basis_profile_conversion_bytes(direction="export")
+    parent_words = (
+        maps.tobytes(),
+        q_maps.tobytes(),
+        u_maps.tobytes(),
+        v_maps.tobytes(),
+        frequencies.tobytes(),
+        pixel_ids.tobytes(),
+    )
+    adapted = HealpixData(
+        maps=_copy_f64le(maps),
+        q_maps=_copy_f64le(q_maps),
+        u_maps=np.ascontiguousarray(-_copy_f64le(u_maps)),
+        v_maps=_copy_f64le(v_maps),
+        frequencies=_copy_f64le(frequencies),
+        nside=owner.nside,
+        hpx_inds=pixel_ids,
+        coordinate_frame=owner.coordinate_frame,
+        ordering=owner.ordering,
+        i_unit=owner.i_unit,
+        q_unit=owner.q_unit,
+        u_unit=owner.u_unit,
+        v_unit=owner.v_unit,
+        i_brightness_conversion=owner.i_brightness_conversion,
+        q_brightness_conversion=owner.q_brightness_conversion,
+        u_brightness_conversion=owner.u_brightness_conversion,
+        v_brightness_conversion=owner.v_brightness_conversion,
+    )
+    _require(
+        (
+            owner.maps.tobytes(),
+            q_maps.tobytes(),
+            u_maps.tobytes(),
+            v_maps.tobytes(),
+            owner.frequencies.tobytes(),
+            pixel_ids.tobytes(),
+        )
+        == parent_words,
+        "parent mutated",
+    )
+    _require(adapted.polarization_materialization is None, "copy must stay unbound")
+    _require(adapted.tangent_polarization_frame is None, "copy must stay unbound")
+    adapted_q = adapted.q_maps
+    adapted_u = adapted.u_maps
+    adapted_v = adapted.v_maps
+    if adapted_q is None or adapted_u is None or adapted_v is None:
+        raise ValueError("sorted child requires all Stokes components")
+    _require(adapted.maps.tobytes() == maps.tobytes(), "I words must be preserved")
+    _require(adapted_q.tobytes() == q_maps.tobytes(), "Q words must be preserved")
+    _require(adapted_v.tobytes() == v_maps.tobytes(), "V words must be preserved")
+    _require(
+        adapted.frequencies.tobytes() == frequencies.tobytes(),
+        "frequency words must be preserved",
+    )
+    expected_u = np.ascontiguousarray(-_copy_f64le(u_maps))
+    _require(adapted_u.tobytes() == expected_u.tobytes(), "U words must reverse sign")
+    _require(
+        not np.shares_memory(adapted.maps, maps)
+        and not np.shares_memory(adapted_q, q_maps)
+        and not np.shares_memory(adapted_u, u_maps)
+        and not np.shares_memory(adapted_v, v_maps)
+        and not np.shares_memory(adapted.frequencies, frequencies),
+        "copy shares parent storage",
+    )
+    return adapted
 
 
 def _permutation_source_indices(permutation: bytes) -> tuple[int, ...]:

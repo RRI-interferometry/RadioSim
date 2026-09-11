@@ -11,6 +11,7 @@ import pytest
 from radiosim.core.sky.containers._native_interchange import (
     NativeChainEvidence,
     SerializedNativePayload,
+    adapt_sorted_healpix_u_sign,
     basis_profile_conversion_bytes,
     bind_serialized_native,
     bind_sorted_canonical_child,
@@ -982,3 +983,168 @@ def test_frequency_sorted_copy_refuses_invalid_actual_input(mutation: str) -> No
         )
     with pytest.raises(ValueError):
         _ = copy_frequency_sorted_healpix(target)
+
+
+def _frequency_sorted_unbound_owner() -> HealpixData:
+    return HealpixData(
+        maps=np.array(
+            [[11.0, 21.0, 31.0], [12.0, 22.0, 32.0], [10.0, 20.0, 30.0]], dtype="<f8"
+        ),
+        q_maps=np.array(
+            [[2.1, 0.1, 1.1], [2.2, 0.2, 1.2], [2.0, 0.0, 1.0]], dtype="<f8"
+        ),
+        u_maps=np.array(
+            [[3.1, -1.1, 0.6], [3.2, -1.2, 0.7], [3.0, -1.0, 0.5]], dtype="<f8"
+        ),
+        v_maps=np.array(
+            [[4.1, 5.1, 6.1], [4.2, 5.2, 6.2], [4.0, 5.0, 6.0]], dtype="<f8"
+        ),
+        frequencies=np.array([80e6, 100e6, 120e6], dtype="<f8"),
+        nside=1,
+        hpx_inds=np.array([4, 0, 9], dtype="<i8"),
+        coordinate_frame="icrs",
+        ordering="ring",
+        i_brightness_conversion="rayleigh-jeans",
+    )
+
+
+def test_sorted_u_sign_matches_independent_literals() -> None:
+    owner = _frequency_sorted_unbound_owner()
+    parent_maps = owner.maps.tobytes()
+    parent_q = owner.q_maps.tobytes() if owner.q_maps is not None else b""
+    parent_u = owner.u_maps.tobytes() if owner.u_maps is not None else b""
+    parent_v = owner.v_maps.tobytes() if owner.v_maps is not None else b""
+    parent_freq = owner.frequencies.tobytes()
+    parent_ids = owner.hpx_inds.tobytes() if owner.hpx_inds is not None else b""
+    adapted = adapt_sorted_healpix_u_sign(owner)
+    expected_u = np.array(
+        [[-3.1, 1.1, -0.6], [-3.2, 1.2, -0.7], [-3.0, 1.0, -0.5]], dtype="<f8"
+    )
+    assert adapted.q_maps is not None
+    assert adapted.u_maps is not None
+    assert adapted.v_maps is not None
+    assert adapted.hpx_inds is not None
+    assert adapted.maps.tobytes() == parent_maps
+    assert adapted.q_maps.tobytes() == parent_q
+    assert adapted.u_maps.tobytes() == expected_u.tobytes()
+    assert adapted.v_maps.tobytes() == parent_v
+    assert adapted.frequencies.tobytes() == parent_freq
+    assert adapted.hpx_inds.tobytes() == parent_ids
+    assert adapted.polarization_materialization is None
+    assert adapted.tangent_polarization_frame is None
+    assert owner.maps.tobytes() == parent_maps
+    assert owner.q_maps is not None and owner.q_maps.tobytes() == parent_q
+    assert owner.u_maps is not None and owner.u_maps.tobytes() == parent_u
+    assert owner.v_maps is not None and owner.v_maps.tobytes() == parent_v
+    assert owner.frequencies.tobytes() == parent_freq
+    assert owner.hpx_inds is not None and owner.hpx_inds.tobytes() == parent_ids
+    assert not np.shares_memory(adapted.u_maps, owner.u_maps)
+
+
+def test_sorted_u_sign_reverses_signed_zero_word() -> None:
+    owner = HealpixData(
+        maps=np.array([[10.0]], dtype="<f8"),
+        q_maps=np.array([[2.0]], dtype="<f8"),
+        u_maps=np.array([[0.0]], dtype="<f8"),
+        v_maps=np.array([[4.0]], dtype="<f8"),
+        frequencies=np.array([80e6], dtype="<f8"),
+        nside=1,
+        hpx_inds=np.array([4], dtype="<i8"),
+        coordinate_frame="icrs",
+        ordering="ring",
+        i_brightness_conversion="rayleigh-jeans",
+    )
+    adapted = adapt_sorted_healpix_u_sign(owner)
+    expected_u = np.array([[-0.0]], dtype="<f8")
+    assert adapted.u_maps is not None
+    assert adapted.u_maps.tobytes() == expected_u.tobytes()
+    assert owner.u_maps is not None
+    assert owner.u_maps.tobytes() == np.array([[0.0]], dtype="<f8").tobytes()
+    assert adapted.u_maps.tobytes() != owner.u_maps.tobytes()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["bool_owner", "missing_q", "planck", "galactic", "nest", "dense", "unsorted"],
+)
+def test_sorted_u_sign_refuses_invalid_actual_input(mutation: str) -> None:
+    owner = _frequency_sorted_unbound_owner()
+    target: object = owner
+    if mutation == "bool_owner":
+        target = True
+    elif mutation == "missing_q":
+        target = HealpixData(
+            maps=owner.maps,
+            u_maps=owner.u_maps,
+            v_maps=owner.v_maps,
+            frequencies=owner.frequencies,
+            nside=owner.nside,
+            hpx_inds=owner.hpx_inds,
+            coordinate_frame="icrs",
+            ordering="ring",
+            i_brightness_conversion="rayleigh-jeans",
+        )
+    elif mutation == "planck":
+        target = HealpixData(
+            maps=owner.maps,
+            q_maps=owner.q_maps,
+            u_maps=owner.u_maps,
+            v_maps=owner.v_maps,
+            frequencies=owner.frequencies,
+            nside=owner.nside,
+            hpx_inds=owner.hpx_inds,
+            coordinate_frame="icrs",
+            ordering="ring",
+            i_brightness_conversion="planck",
+        )
+    elif mutation == "galactic":
+        target = HealpixData(
+            maps=owner.maps,
+            q_maps=owner.q_maps,
+            u_maps=owner.u_maps,
+            v_maps=owner.v_maps,
+            frequencies=owner.frequencies,
+            nside=owner.nside,
+            hpx_inds=owner.hpx_inds,
+            coordinate_frame="galactic",
+            ordering="ring",
+            i_brightness_conversion="rayleigh-jeans",
+        )
+    elif mutation == "nest":
+        target = HealpixData(
+            maps=owner.maps,
+            q_maps=owner.q_maps,
+            u_maps=owner.u_maps,
+            v_maps=owner.v_maps,
+            frequencies=owner.frequencies,
+            nside=owner.nside,
+            hpx_inds=owner.hpx_inds,
+            coordinate_frame="icrs",
+            ordering="nest",
+            i_brightness_conversion="rayleigh-jeans",
+        )
+    elif mutation == "dense":
+        dense_i = np.zeros((3, 12), dtype="<f8")
+        dense_q = np.zeros((3, 12), dtype="<f8")
+        dense_u = np.zeros((3, 12), dtype="<f8")
+        dense_v = np.zeros((3, 12), dtype="<f8")
+        dense_i[:, :3] = owner.maps
+        dense_q[:, :3] = owner.q_maps
+        dense_u[:, :3] = owner.u_maps
+        dense_v[:, :3] = owner.v_maps
+        target = HealpixData(
+            maps=dense_i,
+            q_maps=dense_q,
+            u_maps=dense_u,
+            v_maps=dense_v,
+            frequencies=owner.frequencies,
+            nside=1,
+            coordinate_frame="icrs",
+            ordering="ring",
+            i_brightness_conversion="rayleigh-jeans",
+        )
+    else:
+        unsorted, _, _ = _sorted_child_owner()
+        target = unsorted
+    with pytest.raises(ValueError):
+        _ = adapt_sorted_healpix_u_sign(target)
