@@ -827,6 +827,25 @@ This is local frequency-sorted copy evidence. It does not implement
 file roundtrip, native interoperability, SCI-004, exact-SHA CI, or
 PERF-001.
 
+Native interchange A10 U-sign adaptation is committed and pushed as
+`0324872fa00bfe60b035ac9bb3c7e9b027f8c707`. The 304/1 change (138/1
+production, 166 tests) adds `adapt_sorted_healpix_u_sign`, which
+negates U once on an already frequency-sorted unbound HealpixData
+while preserving I/Q/V, frequencies and physical IDs. It does not pack
+a theta/phi tensor, wrap pyradiosky, or replace the attached export
+refusal. Round1 first-failure gates then passed helper_controls,
+baseline-apply, format, lint, diff, scope-strict, default and py312.
+Both runtimes collected and passed exactly 84 cases with JUnit identity
+joins and no failures, errors or skips. Frozen gate manifest
+`1a56c9b77c17bb24e51bd59a9a5dccaa8ffe224b8beb11d428adbf44f5270455`
+received independent static ACCEPT
+`7483f8fa328759786711e13963095eebed359b4755c74863637ee1c1abb30725`
+and independent applied-result ACCEPT
+`5488b80b0f624b2186dc85ed4575eb5a5e7b4763ca02e1efeb4df9b917a69634`.
+This is local U-sign adaptation evidence. It does not implement file
+roundtrip, native interoperability, SCI-004, exact-SHA CI, or
+PERF-001.
+
 L1 cleanup source policy has both independent
 ACCEPTs and root authentication of 139 members (3,897,293 bytes). The unexecuted
 config-probe round1 was rejected for roster, resource-bound and failure-receipt
