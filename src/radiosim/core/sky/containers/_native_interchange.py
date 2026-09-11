@@ -1,4 +1,4 @@
-"""Unwired finite transport primitives and sorted-child consumer; no export release."""
+"""Unwired finite transport primitives, sorted-child consumer, and frequency-sorted copy; no export release."""
 
 import hashlib
 import json
@@ -549,6 +549,127 @@ def bind_sorted_canonical_child(
         parent_evidence,
         None,
     )
+
+
+def _take_frequency_axis(array: np.ndarray, indices: tuple[int, ...]) -> np.ndarray:
+    return np.ascontiguousarray(array[np.asarray(indices, dtype=np.int64)])
+
+
+def copy_frequency_sorted_healpix(owner: object) -> HealpixData:
+    """Copy Stokes and frequency axes into stable frequency order.
+
+    Parent arrays are not mutated. The copy is unbound: no tangent or
+    materialization is attached. This does not pack a theta/phi tensor,
+    wrap pyradiosky, or publish export.
+    """
+    if not _is_healpix(owner):
+        raise ValueError("expected HealpixData")
+    if owner.coordinate_frame != "icrs":
+        raise ValueError("expected icrs owner")
+    if owner.ordering != "ring":
+        raise ValueError("expected ring owner")
+    if (
+        type(owner.i_unit) is not str
+        or owner.i_unit != "K"
+        or type(owner.q_unit) is not str
+        or owner.q_unit != "K"
+        or type(owner.u_unit) is not str
+        or owner.u_unit != "K"
+        or type(owner.v_unit) is not str
+        or owner.v_unit != "K"
+    ):
+        raise ValueError("stored units must be K, including absent components")
+    if (
+        owner.i_brightness_conversion != "rayleigh-jeans"
+        or owner.q_brightness_conversion != "rayleigh-jeans"
+        or owner.u_brightness_conversion != "rayleigh-jeans"
+        or owner.v_brightness_conversion != "rayleigh-jeans"
+    ):
+        raise ValueError("sorted child requires rayleigh-jeans")
+    maps = owner.maps
+    q_maps = owner.q_maps
+    u_maps = owner.u_maps
+    v_maps = owner.v_maps
+    frequencies = owner.frequencies
+    pixel_ids = owner.hpx_inds
+    if q_maps is None or u_maps is None or v_maps is None:
+        raise ValueError("sorted child requires all Stokes components")
+    if pixel_ids is None:
+        raise ValueError("sorted child requires explicit pixel IDs")
+    arrays = (maps, q_maps, u_maps, v_maps, frequencies)
+    for array in arrays:
+        _require(type(array) is np.ndarray, "expected exact ndarray")
+        _require(array.dtype.str == "<f8", "unsupported endpoint dtype")
+        _require(
+            not array.flags.writeable and array.flags.c_contiguous,
+            "readonly C owner required",
+        )
+    _require(type(pixel_ids) is np.ndarray, "expected exact ndarray")
+    _require(pixel_ids.dtype.str == "<i8", "unsupported endpoint dtype")
+    _require(
+        not pixel_ids.flags.writeable and pixel_ids.flags.c_contiguous,
+        "readonly C owner required",
+    )
+    blob = bytes(frequencies.tobytes())
+    words = tuple(blob[index : index + 8].hex() for index in range(0, len(blob), 8))
+    values = [struct.unpack("<d", bytes.fromhex(word))[0] for word in words]
+    indices = tuple(sorted(range(len(values)), key=values.__getitem__))
+    _ = frequency_permutation_bytes(source_indices=indices, input_frequency_words=words)
+    parent_words = (
+        maps.tobytes(),
+        q_maps.tobytes(),
+        u_maps.tobytes(),
+        v_maps.tobytes(),
+        frequencies.tobytes(),
+        pixel_ids.tobytes(),
+    )
+    copied = HealpixData(
+        maps=_take_frequency_axis(maps, indices),
+        q_maps=_take_frequency_axis(q_maps, indices),
+        u_maps=_take_frequency_axis(u_maps, indices),
+        v_maps=_take_frequency_axis(v_maps, indices),
+        frequencies=_take_frequency_axis(frequencies, indices),
+        nside=owner.nside,
+        hpx_inds=pixel_ids,
+        coordinate_frame=owner.coordinate_frame,
+        ordering=owner.ordering,
+        i_unit=owner.i_unit,
+        q_unit=owner.q_unit,
+        u_unit=owner.u_unit,
+        v_unit=owner.v_unit,
+        i_brightness_conversion=owner.i_brightness_conversion,
+        q_brightness_conversion=owner.q_brightness_conversion,
+        u_brightness_conversion=owner.u_brightness_conversion,
+        v_brightness_conversion=owner.v_brightness_conversion,
+    )
+    _require(
+        (
+            owner.maps.tobytes(),
+            q_maps.tobytes(),
+            u_maps.tobytes(),
+            v_maps.tobytes(),
+            owner.frequencies.tobytes(),
+            pixel_ids.tobytes(),
+        )
+        == parent_words,
+        "parent mutated",
+    )
+    _require(copied.polarization_materialization is None, "copy must stay unbound")
+    _require(copied.tangent_polarization_frame is None, "copy must stay unbound")
+    copied_q = copied.q_maps
+    copied_u = copied.u_maps
+    copied_v = copied.v_maps
+    if copied_q is None or copied_u is None or copied_v is None:
+        raise ValueError("sorted child requires all Stokes components")
+    _require(
+        not np.shares_memory(copied.maps, maps)
+        and not np.shares_memory(copied_q, q_maps)
+        and not np.shares_memory(copied_u, u_maps)
+        and not np.shares_memory(copied_v, v_maps)
+        and not np.shares_memory(copied.frequencies, frequencies),
+        "copy shares parent storage",
+    )
+    return copied
 
 
 def _permutation_source_indices(permutation: bytes) -> tuple[int, ...]:
