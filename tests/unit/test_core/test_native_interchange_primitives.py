@@ -12,10 +12,20 @@ from radiosim.core.sky.containers._native_interchange import (
     SerializedNativePayload,
     basis_profile_conversion_bytes,
     bind_serialized_native,
+    bind_sorted_canonical_child,
     export_declaration_bytes,
     frequency_permutation_bytes,
     import_declaration_bytes,
     transfer_record_bytes,
+)
+from radiosim.core.sky.containers._polarization_materialization import (
+    complete_native_identity,
+)
+from radiosim.core.sky.containers.constants import BrightnessConversion
+from radiosim.core.sky.containers.healpix import HealpixData
+from radiosim.core.sky.containers.point import TangentPolarizationFrame
+from radiosim.core.sky.containers.polarization_materialization import (
+    PolarizationMaterializationEvidence,
 )
 
 _WORDS = (
@@ -502,3 +512,178 @@ def test_export_declaration_refuses_invalid_actual_input(mutation: str) -> None:
         payload = "33" * 32 + " "
     with pytest.raises(ValueError):
         _ = export_declaration_bytes(parent_materialization_id=payload)
+
+
+def _sorted_child_owner() -> tuple[
+    HealpixData, PolarizationMaterializationEvidence, TangentPolarizationFrame
+]:
+    maps = np.array(
+        [[10.0, 20.0, 30.0], [11.0, 21.0, 31.0], [12.0, 22.0, 32.0]], dtype="<f8"
+    )
+    q_maps = np.array([[2.0, 0.0, 1.0], [2.1, 0.1, 1.1], [2.2, 0.2, 1.2]], dtype="<f8")
+    u_maps = np.array(
+        [[3.0, -1.0, 0.5], [3.1, -1.1, 0.6], [3.2, -1.2, 0.7]], dtype="<f8"
+    )
+    v_maps = np.array([[4.0, 5.0, 6.0], [4.1, 5.1, 6.1], [4.2, 5.2, 6.2]], dtype="<f8")
+    owner = HealpixData(
+        maps=maps,
+        q_maps=q_maps,
+        u_maps=u_maps,
+        v_maps=v_maps,
+        frequencies=np.array([120e6, 80e6, 100e6], dtype="<f8"),
+        nside=1,
+        hpx_inds=np.array([4, 0, 9], dtype="<i8"),
+        coordinate_frame="icrs",
+        ordering="ring",
+        i_brightness_conversion="rayleigh-jeans",
+    )
+    frame = TangentPolarizationFrame.canonical("icrs")
+    parent = complete_native_identity(
+        owner,
+        brightness_conversion=BrightnessConversion.RAYLEIGH_JEANS,
+        source_profile="radiosim_ne_iau_v1",
+        tangent_frame=frame,
+    )
+    return owner, parent, frame
+
+
+def test_sorted_child_matches_independent_literal_records() -> None:
+    owner, parent, frame = _sorted_child_owner()
+    outgoing = "aa" * 32
+    metadata = json.dumps(
+        {"schema_version": "radiosim.sorted-child-output-metadata.v1"},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    frequencies = (120e6, 80e6, 100e6)
+    words = tuple(struct.pack("<d", value).hex() for value in frequencies)
+    permutation_expected = {
+        "schema_version": "radiosim.native-frequency-permutation.v1",
+        "algorithm": "stable_frequency_sort_v1",
+        "axis": "frequency",
+        "source_indices": [1, 2, 0],
+        "input_frequency_words": list(words),
+        "output_frequency_words": [words[1], words[2], words[0]],
+        "pixel_order": "preserve_physical_id_sequence",
+        "arithmetic": "none",
+    }
+    permutation = json.dumps(
+        permutation_expected,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    declaration_expected = {
+        "schema_version": "radiosim.native-export-declaration.v1",
+        "parent_materialization_id": parent.record.materialization_id,
+        "source_profile": "radiosim_ne_iau_v1",
+        "output_profile": "pyradiosky_1_1_0_theta_phi_v1",
+        "coordinate_frame": "icrs",
+    }
+    declaration = json.dumps(
+        declaration_expected,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    incoming = parent.record.output_payload_sha256
+    operation = {
+        "kind": "frequency_selection",
+        "input_sha256": incoming,
+        "output_sha256": outgoing,
+        "parameters_sha256": hashlib.sha256(permutation).hexdigest(),
+    }
+    body = {
+        "schema_version": "radiosim.polarization-materialization.v1",
+        "component_kind": "healpix",
+        "source_profile": "radiosim_ne_iau_v1",
+        "declaration_origin": "inherited_normalized",
+        "declaration_digest": hashlib.sha256(declaration).hexdigest(),
+        "source_frame": "icrs",
+        "output_frame": "icrs",
+        "input_payload_sha256": incoming,
+        "output_payload_sha256": outgoing,
+        "operations": [operation],
+        "parent_materialization_ids": [parent.record.materialization_id],
+    }
+    encoded = json.dumps(
+        body,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    child_id = hashlib.sha256(
+        b"RADIOSIM_POLARIZATION_MATERIALIZATION_V1\n"
+        + struct.pack("<Q", len(encoded))
+        + encoded
+    ).hexdigest()
+    actual = bind_sorted_canonical_child(
+        owner,
+        brightness_conversion=BrightnessConversion.RAYLEIGH_JEANS,
+        source_profile="radiosim_ne_iau_v1",
+        tangent_frame=frame,
+        parent_evidence=parent,
+        source_indices=(1, 2, 0),
+        output_payload_sha256=outgoing,
+        output_payload_metadata_json=metadata,
+    )
+    assert actual.declaration_json == declaration
+    assert actual.operation_parameters_json == (permutation,)
+    assert actual.record.materialization_id == child_id
+    assert actual.record.declaration_origin == "inherited_normalized"
+    assert actual.record.operations[0].kind == "frequency_selection"
+    assert actual.record.parent_materialization_ids == (
+        parent.record.materialization_id,
+    )
+    assert actual.transfer_evidence is None
+    assert actual.parent_evidence is parent
+    assert actual.input_payload_metadata_json == parent.payload_metadata_json
+    assert actual.output_payload_metadata_json == metadata
+    assert owner.polarization_materialization is None
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "bool_owner",
+        "bool_parent",
+        "wrong_permutation",
+        "uppercase_digest",
+        "bytes_metadata",
+        "planck",
+        "missing_frame",
+    ],
+)
+def test_sorted_child_refuses_invalid_actual_input(mutation: str) -> None:
+    owner, parent, frame = _sorted_child_owner()
+    kwargs: dict[str, object] = {
+        "brightness_conversion": BrightnessConversion.RAYLEIGH_JEANS,
+        "source_profile": "radiosim_ne_iau_v1",
+        "tangent_frame": frame,
+        "parent_evidence": parent,
+        "source_indices": (1, 2, 0),
+        "output_payload_sha256": "aa" * 32,
+        "output_payload_metadata_json": b"{}",
+    }
+    target: object = owner
+    if mutation == "bool_owner":
+        target = True
+    elif mutation == "bool_parent":
+        kwargs["parent_evidence"] = True
+    elif mutation == "wrong_permutation":
+        kwargs["source_indices"] = (2, 1, 0)
+    elif mutation == "uppercase_digest":
+        kwargs["output_payload_sha256"] = "AA" * 32
+    elif mutation == "bytes_metadata":
+        kwargs["output_payload_metadata_json"] = True
+    elif mutation == "planck":
+        kwargs["brightness_conversion"] = BrightnessConversion.PLANCK
+    else:
+        kwargs["tangent_frame"] = None
+    with pytest.raises(ValueError):
+        _ = bind_sorted_canonical_child(target, **kwargs)

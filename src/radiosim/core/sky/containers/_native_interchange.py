@@ -1,4 +1,4 @@
-"""Unwired finite transport identity primitives; no operation-chain acceptance."""
+"""Unwired finite transport primitives and sorted-child factory; no owner dispatch."""
 
 import hashlib
 import json
@@ -10,9 +10,21 @@ from typing import TypeGuard
 import numpy as np
 from numpy.typing import NDArray
 
+from ._polarization_materialization import require_native_identity
+from .constants import BrightnessConversion
+from .healpix import HealpixData
+from .point import TangentPolarizationFrame
+from .polarization_materialization import (
+    PolarizationMaterialization,
+    PolarizationMaterializationEvidence,
+    PolarizationOperation,
+)
+
 _PROFILE = "pyradiosky_1_1_0_theta_phi_v1"
+_CANONICAL = "radiosim_ne_iau_v1"
 _DOMAIN = b"RADIOSIM_PYRADIOSKY_HEALPIX_PAYLOAD_V1\n"
 _TRANSFER_DOMAIN = b"RADIOSIM_NATIVE_PYRADIOSKY_TRANSFER_V1\n"
+_MATERIALIZATION_DOMAIN = b"RADIOSIM_POLARIZATION_MATERIALIZATION_V1\n"
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +71,27 @@ def _require(condition: bool, message: str) -> None:
 
 def _is_exact_tuple(value: object) -> TypeGuard[tuple[object, ...]]:
     return type(value) is tuple
+
+
+def _is_healpix(value: object) -> TypeGuard[HealpixData]:
+    return isinstance(value, HealpixData)
+
+
+def _is_identity_parent(
+    value: object,
+) -> TypeGuard[PolarizationMaterializationEvidence]:
+    return type(value) is PolarizationMaterializationEvidence
+
+
+def _is_tangent_frame(value: object) -> TypeGuard[TangentPolarizationFrame]:
+    return type(value) is TangentPolarizationFrame
+
+
+def _is_rayleigh_jeans(value: object) -> TypeGuard[BrightnessConversion]:
+    return (
+        type(value) is BrightnessConversion
+        and value is BrightnessConversion.RAYLEIGH_JEANS
+    )
 
 
 def bind_serialized_native(value: SerializedNativePayload) -> SerializedPayloadBinding:
@@ -370,4 +403,132 @@ def basis_profile_conversion_bytes(*, direction: object) -> bytes:
             "storage_action": "preserve_f64le",
             "tensor_layout": "stokes_frequency_pixel",
         }
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class NativeChainEvidence:
+    """Untrusted depth-1 sorted-child carrier; bind_sorted_canonical_child validates."""
+
+    record: PolarizationMaterialization
+    tangent_frame: TangentPolarizationFrame | None
+    declaration_json: bytes
+    operation_parameters_json: tuple[bytes, ...]
+    input_payload_metadata_json: bytes
+    output_payload_metadata_json: bytes
+    brightness_conversion: BrightnessConversion
+    parent_evidence: PolarizationMaterializationEvidence
+    transfer_evidence: None
+
+
+def bind_sorted_canonical_child(
+    owner: object,
+    *,
+    brightness_conversion: object,
+    source_profile: object,
+    tangent_frame: object,
+    parent_evidence: object,
+    source_indices: object,
+    output_payload_sha256: object,
+    output_payload_metadata_json: object,
+) -> NativeChainEvidence:
+    """Bind a depth-1 sorted child after replaying identity on the parent owner.
+
+    This factory does not permute arrays, attach evidence, or dispatch owner
+    validation. The caller still excludes alias mutation for the full call.
+    """
+    if not _is_healpix(owner):
+        raise ValueError("expected HealpixData")
+    if not _is_identity_parent(parent_evidence):
+        raise ValueError("expected identity parent evidence")
+    if not _is_rayleigh_jeans(brightness_conversion):
+        raise ValueError("sorted child requires rayleigh-jeans")
+    if type(source_profile) is not str or source_profile != _CANONICAL:
+        raise ValueError("identity requires the explicit canonical source profile")
+    if not _is_tangent_frame(tangent_frame):
+        raise ValueError("expected a canonical tangent frame")
+    if type(output_payload_metadata_json) is not bytes:
+        raise ValueError("expected output payload metadata bytes")
+    _require(
+        output_payload_metadata_json != b"", "expected output payload metadata bytes"
+    )
+    if type(output_payload_sha256) is not str:
+        raise ValueError("expected lowercase SHA256")
+    _require(
+        len(output_payload_sha256) == 64
+        and all(c in "0123456789abcdef" for c in output_payload_sha256),
+        "expected lowercase SHA256",
+    )
+    require_native_identity(
+        owner,
+        brightness_conversion=brightness_conversion,
+        source_profile=_CANONICAL,
+        tangent_frame=tangent_frame,
+        expected=parent_evidence,
+    )
+    _require(owner.coordinate_frame == "icrs", "expected icrs owner")
+    frequencies = owner.frequencies
+    _require(type(frequencies) is np.ndarray, "expected exact ndarray")
+    _require(frequencies.dtype.str == "<f8", "unsupported endpoint dtype")
+    _require(
+        not frequencies.flags.writeable and frequencies.flags.c_contiguous,
+        "readonly C owner required",
+    )
+    blob = bytes(frequencies.tobytes())
+    words = tuple(blob[index : index + 8].hex() for index in range(0, len(blob), 8))
+    permutation = frequency_permutation_bytes(
+        source_indices=source_indices, input_frequency_words=words
+    )
+    parent_id = parent_evidence.record.materialization_id
+    incoming = parent_evidence.record.output_payload_sha256
+    declaration = export_declaration_bytes(parent_materialization_id=parent_id)
+    operation = PolarizationOperation(
+        "frequency_selection",
+        incoming,
+        output_payload_sha256,
+        hashlib.sha256(permutation).hexdigest(),
+    )
+    declaration_digest = hashlib.sha256(declaration).hexdigest()
+    body = {
+        "schema_version": "radiosim.polarization-materialization.v1",
+        "component_kind": "healpix",
+        "source_profile": _CANONICAL,
+        "declaration_origin": "inherited_normalized",
+        "declaration_digest": declaration_digest,
+        "source_frame": "icrs",
+        "output_frame": "icrs",
+        "input_payload_sha256": incoming,
+        "output_payload_sha256": output_payload_sha256,
+        "operations": [operation.as_mapping()],
+        "parent_materialization_ids": [parent_id],
+    }
+    encoded = _json(body)
+    _require(len(encoded) < 2**64, "materialization preimage length exceeds uint64")
+    child_id = hashlib.sha256(
+        _MATERIALIZATION_DOMAIN + struct.pack("<Q", len(encoded)) + encoded
+    ).hexdigest()
+    record = PolarizationMaterialization(
+        "radiosim.polarization-materialization.v1",
+        "healpix",
+        _CANONICAL,
+        "inherited_normalized",
+        declaration_digest,
+        "icrs",
+        "icrs",
+        incoming,
+        output_payload_sha256,
+        (operation,),
+        (parent_id,),
+        child_id,
+    )
+    return NativeChainEvidence(
+        record,
+        tangent_frame,
+        declaration,
+        (permutation,),
+        parent_evidence.payload_metadata_json,
+        output_payload_metadata_json,
+        BrightnessConversion.RAYLEIGH_JEANS,
+        parent_evidence,
+        None,
     )
