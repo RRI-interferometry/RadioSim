@@ -768,6 +768,25 @@ This is local unwired export-declaration evidence. It does not implement
 a chain consumer, file roundtrip, native interoperability, SCI-004,
 exact-SHA CI, or PERF-001.
 
+Native interchange A7 sorted-child factory is committed and pushed as
+`fcaf6923dce7e6c86baf395b303d8b86cc804618`. The 347/1 primitive (162/1
+production, 185 tests) binds a depth-1 NativeChainEvidence after
+replaying native identity, encoding frequency permutation and export
+declaration, and hashing the twelve-field child record. It does not
+permute arrays, attach evidence, or dispatch owner validation.
+Round1 first-failure gates then passed helper_controls, baseline-apply,
+format, lint, diff, scope-strict, default and py312. Both runtimes
+collected and passed exactly 62 cases with JUnit identity joins and no
+failures, errors or skips. Frozen gate manifest
+`c3d5929c7bfeacb11001a2676100725858295381fafa6b0ac2d957c49d6aa17c`
+received independent static ACCEPT
+`1ab975f25c9cc7b62dc058e3d6627ee8abf92a157e98b4e1ab7037f94c7efb26`
+and independent applied-result ACCEPT
+`e44209be5b66137bdfa8a652051ae9ca98f6fdd27be2e0b385c525f0e384bee5`.
+This is local unwired sorted-child factory evidence. It does not
+implement file roundtrip, native interoperability, SCI-004, exact-SHA
+CI, or PERF-001.
+
 L1 cleanup source policy has both independent
 ACCEPTs and root authentication of 139 members (3,897,293 bytes). The unexecuted
 config-probe round1 was rejected for roster, resource-bound and failure-receipt
