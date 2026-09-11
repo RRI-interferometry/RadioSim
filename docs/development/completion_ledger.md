@@ -866,6 +866,26 @@ This is local theta/phi Stokes pack evidence. It does not implement
 file roundtrip, native interoperability, SCI-004, exact-SHA CI, or
 PERF-001.
 
+Native interchange A12 pyradiosky wrap and E bind is committed and
+pushed as `c8c4c7ae3d927359167a545dbd6a1be66cd68f82`. The 292/2 change
+(135/2 production, 157 tests) adds `wrap_packed_theta_phi_stokes` and
+`require_bound_theta_phi_endpoint`, which construct actual pyradiosky
+1.1.0 from a packed `[4, F, N]` payload and re-read Stokes, axes and
+headers so constructor changes refuse. It does not create a transfer
+wrapper, write HDF5, or replace the attached export refusal. Round1
+first-failure gates then passed helper_controls, baseline-apply,
+format, lint, diff, scope-strict, default and py312. Both runtimes
+collected and passed exactly 101 cases with JUnit identity joins and
+no failures, errors or skips. Frozen gate manifest
+`d33ef023edcb60e61108e9f799886b0e5f16b9f788222b2d993b04926c3c6139`
+received independent static ACCEPT
+`f5dfe3b39b9c8318c066cb1bee4c938340a0a937beb9b35a25370ac265a6d9dd`
+and independent applied-result ACCEPT
+`40cfb35c61736129ee40892e94a83f7d7c778bcab19315a88fc5156ab84434e8`.
+This is local pyradiosky wrap and E-bind evidence. It does not
+implement file roundtrip, native interoperability, SCI-004, exact-SHA
+CI, or PERF-001.
+
 L1 cleanup source policy has both independent
 ACCEPTs and root authentication of 139 members (3,897,293 bytes). The unexecuted
 config-probe round1 was rejected for roster, resource-bound and failure-receipt
