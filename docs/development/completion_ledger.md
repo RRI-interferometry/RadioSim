@@ -731,6 +731,25 @@ This is local unwired frequency-permutation encoder evidence. It does
 not implement a chain consumer, file roundtrip, native
 interoperability, SCI-004, exact-SHA CI, or PERF-001.
 
+Native interchange A5 basis-profile-conversion encoder is committed and
+pushed as `189f5066c2805fac598dc9fd4a8ffc6984937845`. The 107-line
+additive primitive (36 production, 71 tests, zero removals) encodes
+closed thirteen-field basis-profile-conversion parameters from an
+exact export or import direction without adapting arrays or
+authenticating a graph. Round1 first-failure gates then passed
+helper_controls, baseline-apply, format, lint, diff, scope-strict,
+default and py312. Both runtimes collected and passed exactly 46 cases
+with JUnit identity joins and no failures, errors or skips. Frozen gate
+manifest
+`d6e8d2079d563e3b92c079cc3266047b680f28e42c218d4108598c41fb73afca`
+received independent static ACCEPT
+`4378bfb9d23eda8ebfb26aa666024a06fa211ffd40f50cfb729bd4f8bbd6c501`
+and independent applied-result ACCEPT
+`c1c6581096d0a682f560d998349df9762d5547cc391fd1ab4acadd234d57507e`.
+This is local unwired basis-parameter evidence. It does not implement a
+chain consumer, file roundtrip, native interoperability, SCI-004,
+exact-SHA CI, or PERF-001.
+
 L1 cleanup source policy has both independent
 ACCEPTs and root authentication of 139 members (3,897,293 bytes). The unexecuted
 config-probe round1 was rejected for roster, resource-bound and failure-receipt
