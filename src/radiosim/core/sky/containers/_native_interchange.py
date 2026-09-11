@@ -1,4 +1,4 @@
-"""Unwired finite transport primitives, sorted-child consumer, frequency-sorted copy, and U-sign adaptation; no export release."""
+"""Unwired finite transport primitives, sorted-child consumer, frequency-sorted copy, U-sign adaptation, and theta/phi pack; no export release."""
 
 import hashlib
 import json
@@ -677,6 +677,17 @@ def _copy_f64le(array: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(copied)
 
 
+def _copy_i8le(array: np.ndarray) -> np.ndarray:
+    copied = np.frombuffer(bytes(array.tobytes()), dtype="<i8").reshape(array.shape)
+    return np.ascontiguousarray(copied)
+
+
+def _lock(array: np.ndarray) -> np.ndarray:
+    locked = np.ascontiguousarray(array)
+    locked.setflags(write=False)
+    return locked
+
+
 def adapt_sorted_healpix_u_sign(owner: object) -> HealpixData:
     """Negate U on an already frequency-sorted copy for theta/phi export.
 
@@ -807,6 +818,135 @@ def adapt_sorted_healpix_u_sign(owner: object) -> HealpixData:
         "copy shares parent storage",
     )
     return adapted
+
+
+def pack_sorted_theta_phi_stokes(owner: object) -> SerializedNativePayload:
+    """Pack already sign-adapted sorted Stokes into a [4, F, N] theta/phi tensor.
+
+    Parent arrays are not mutated. This does not wrap pyradiosky, write HDF5,
+    or publish export.
+    """
+    if not _is_healpix(owner):
+        raise ValueError("expected HealpixData")
+    if owner.coordinate_frame != "icrs":
+        raise ValueError("expected icrs owner")
+    if owner.ordering != "ring":
+        raise ValueError("expected ring owner")
+    if owner.tangent_polarization_frame is not None:
+        raise ValueError("copy must stay unbound")
+    if owner.polarization_materialization is not None:
+        raise ValueError("copy must stay unbound")
+    if (
+        type(owner.i_unit) is not str
+        or owner.i_unit != "K"
+        or type(owner.q_unit) is not str
+        or owner.q_unit != "K"
+        or type(owner.u_unit) is not str
+        or owner.u_unit != "K"
+        or type(owner.v_unit) is not str
+        or owner.v_unit != "K"
+    ):
+        raise ValueError("stored units must be K, including absent components")
+    if (
+        owner.i_brightness_conversion != "rayleigh-jeans"
+        or owner.q_brightness_conversion != "rayleigh-jeans"
+        or owner.u_brightness_conversion != "rayleigh-jeans"
+        or owner.v_brightness_conversion != "rayleigh-jeans"
+    ):
+        raise ValueError("sorted child requires rayleigh-jeans")
+    maps = owner.maps
+    q_maps = owner.q_maps
+    u_maps = owner.u_maps
+    v_maps = owner.v_maps
+    frequencies = owner.frequencies
+    pixel_ids = owner.hpx_inds
+    if q_maps is None or u_maps is None or v_maps is None:
+        raise ValueError("sorted child requires all Stokes components")
+    if pixel_ids is None:
+        raise ValueError("sorted child requires explicit pixel IDs")
+    arrays = (maps, q_maps, u_maps, v_maps, frequencies)
+    for array in arrays:
+        _require(type(array) is np.ndarray, "expected exact ndarray")
+        _require(array.dtype.str == "<f8", "unsupported endpoint dtype")
+        _require(
+            not array.flags.writeable and array.flags.c_contiguous,
+            "readonly C owner required",
+        )
+    _require(type(pixel_ids) is np.ndarray, "expected exact ndarray")
+    _require(pixel_ids.dtype.str == "<i8", "unsupported endpoint dtype")
+    _require(
+        not pixel_ids.flags.writeable and pixel_ids.flags.c_contiguous,
+        "readonly C owner required",
+    )
+    _require(maps.ndim == 2, "stokes shape differs")
+    _require(
+        q_maps.shape == maps.shape
+        and u_maps.shape == maps.shape
+        and v_maps.shape == maps.shape,
+        "stokes shape differs",
+    )
+    _require(frequencies.shape == (maps.shape[0],), "permutation length differs")
+    _require(pixel_ids.shape == (maps.shape[1],), "stokes shape differs")
+    blob = bytes(frequencies.tobytes())
+    words = tuple(blob[index : index + 8].hex() for index in range(0, len(blob), 8))
+    values = [struct.unpack("<d", bytes.fromhex(word))[0] for word in words]
+    indices = tuple(sorted(range(len(values)), key=values.__getitem__))
+    _require(indices == tuple(range(len(values))), "frequencies not strictly sorted")
+    _ = frequency_permutation_bytes(source_indices=indices, input_frequency_words=words)
+    _ = basis_profile_conversion_bytes(direction="export")
+    parent_words = (
+        maps.tobytes(),
+        q_maps.tobytes(),
+        u_maps.tobytes(),
+        v_maps.tobytes(),
+        frequencies.tobytes(),
+        pixel_ids.tobytes(),
+    )
+    packed_frequencies = _lock(_copy_f64le(frequencies))
+    packed_ids = _lock(_copy_i8le(pixel_ids))
+    stokes = np.empty((4, maps.shape[0], maps.shape[1]), dtype="<f8")
+    stokes[0, :, :] = maps
+    stokes[1, :, :] = q_maps
+    stokes[2, :, :] = u_maps
+    stokes[3, :, :] = v_maps
+    packed_stokes = _lock(stokes)
+    payload = SerializedNativePayload(
+        owner.nside,
+        packed_frequencies,
+        packed_ids,
+        packed_stokes,
+        _PROFILE,
+        "icrs",
+        "ring",
+        "healpix",
+        "full",
+        "Hz",
+        "K",
+        "rayleigh-jeans",
+    )
+    _ = bind_serialized_native(payload)
+    _require(
+        (
+            owner.maps.tobytes(),
+            q_maps.tobytes(),
+            u_maps.tobytes(),
+            v_maps.tobytes(),
+            owner.frequencies.tobytes(),
+            pixel_ids.tobytes(),
+        )
+        == parent_words,
+        "parent mutated",
+    )
+    _require(
+        not np.shares_memory(packed_stokes, maps)
+        and not np.shares_memory(packed_stokes, q_maps)
+        and not np.shares_memory(packed_stokes, u_maps)
+        and not np.shares_memory(packed_stokes, v_maps)
+        and not np.shares_memory(packed_frequencies, frequencies)
+        and not np.shares_memory(packed_ids, pixel_ids),
+        "copy shares parent storage",
+    )
+    return payload
 
 
 def _permutation_source_indices(permutation: bytes) -> tuple[int, ...]:
