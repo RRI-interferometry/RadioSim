@@ -750,6 +750,24 @@ This is local unwired basis-parameter evidence. It does not implement a
 chain consumer, file roundtrip, native interoperability, SCI-004,
 exact-SHA CI, or PERF-001.
 
+Native interchange A6 export-declaration encoder is committed and
+pushed as `bc1d252c3f4bd741a0a1af0d194282f39576ec0d`. The 82-line
+additive primitive (25 production, 57 tests, zero removals) encodes
+closed five-field sorted-child export-declaration bytes from a
+lowercase parent materialization ID without authenticating a graph.
+Round1 first-failure gates then passed helper_controls, baseline-apply,
+format, lint, diff, scope-strict, default and py312. Both runtimes
+collected and passed exactly 54 cases with JUnit identity joins and no
+failures, errors or skips. Frozen gate manifest
+`e06f5f9e29b1a8aeb5ad1c2e042a39e1868414a02a4548e0e9e34bf925ed0ce1`
+received independent static ACCEPT
+`6a1096d83f7570ceeafac05e11a0ddb63099008f6ff5cbf8aaf3783b3c347dbe`
+and independent applied-result ACCEPT
+`35712283c46785ec40ca1a979bc72d63f37364f17ecaa1a8224f3c72019fbc9c`.
+This is local unwired export-declaration evidence. It does not implement
+a chain consumer, file roundtrip, native interoperability, SCI-004,
+exact-SHA CI, or PERF-001.
+
 L1 cleanup source policy has both independent
 ACCEPTs and root authentication of 139 members (3,897,293 bytes). The unexecuted
 config-probe round1 was rejected for roster, resource-bound and failure-receipt
