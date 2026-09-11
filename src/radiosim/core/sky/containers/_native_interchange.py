@@ -310,3 +310,39 @@ def frequency_permutation_bytes(
             "arithmetic": "none",
         }
     )
+
+
+def basis_profile_conversion_bytes(*, direction: object) -> bytes:
+    """Encode closed basis-profile-conversion parameters from a direction.
+
+    This primitive does not adapt arrays or authenticate a parent. The
+    consumer must pass the actual export or import direction after checking
+    profile joins, then compare supplied parameter bytes to this result
+    before acceptance.
+    """
+    if type(direction) is not str:
+        raise ValueError("expected exact direction")
+    _require(direction in ("export", "import"), "unsupported conversion direction")
+    canonical = "radiosim_ne_iau_v1"
+    theta_phi = _PROFILE
+    if direction == "export":
+        incoming, outgoing = canonical, theta_phi
+    else:
+        incoming, outgoing = theta_phi, canonical
+    return _json(
+        {
+            "schema_version": "radiosim.native-basis-profile-conversion.v1",
+            "algorithm": "pyradiosky_1_1_0_ne_theta_phi_v1",
+            "direction": direction,
+            "input_profile": incoming,
+            "output_profile": outgoing,
+            "coordinate_frame": "icrs",
+            "signs": [1, 1, -1, 1],
+            "stokes_axis_order": ["I", "Q", "U", "V"],
+            "frequency_action": "preserve",
+            "pixel_action": "preserve",
+            "units_action": "preserve_K_RJ",
+            "storage_action": "preserve_f64le",
+            "tensor_layout": "stokes_frequency_pixel",
+        }
+    )

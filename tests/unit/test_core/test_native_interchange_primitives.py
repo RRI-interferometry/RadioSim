@@ -10,6 +10,7 @@ import pytest
 
 from radiosim.core.sky.containers._native_interchange import (
     SerializedNativePayload,
+    basis_profile_conversion_bytes,
     bind_serialized_native,
     frequency_permutation_bytes,
     import_declaration_bytes,
@@ -374,3 +375,73 @@ def test_frequency_permutation_refuses_invalid_actual_input(mutation: str) -> No
         _ = frequency_permutation_bytes(
             source_indices=indices, input_frequency_words=payload
         )
+
+
+def test_basis_profile_conversion_matches_independent_literal_bytes() -> None:
+    export_expected = {
+        "schema_version": "radiosim.native-basis-profile-conversion.v1",
+        "algorithm": "pyradiosky_1_1_0_ne_theta_phi_v1",
+        "direction": "export",
+        "input_profile": "radiosim_ne_iau_v1",
+        "output_profile": "pyradiosky_1_1_0_theta_phi_v1",
+        "coordinate_frame": "icrs",
+        "signs": [1, 1, -1, 1],
+        "stokes_axis_order": ["I", "Q", "U", "V"],
+        "frequency_action": "preserve",
+        "pixel_action": "preserve",
+        "units_action": "preserve_K_RJ",
+        "storage_action": "preserve_f64le",
+        "tensor_layout": "stokes_frequency_pixel",
+    }
+    import_expected = dict(export_expected)
+    import_expected["direction"] = "import"
+    import_expected["input_profile"] = "pyradiosky_1_1_0_theta_phi_v1"
+    import_expected["output_profile"] = "radiosim_ne_iau_v1"
+    export_actual = basis_profile_conversion_bytes(direction="export")
+    import_actual = basis_profile_conversion_bytes(direction="import")
+    assert export_actual == json.dumps(
+        export_expected,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    assert import_actual == json.dumps(
+        import_expected,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    assert export_actual != import_actual
+    assert json.loads(export_actual)["signs"] == [1, 1, -1, 1]
+    assert json.loads(export_actual)["stokes_axis_order"] == ["I", "Q", "U", "V"]
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "bool_direction",
+        "uppercase",
+        "empty",
+        "unknown",
+        "bytes_direction",
+        "whitespace",
+    ],
+)
+def test_basis_profile_conversion_refuses_invalid_actual_input(mutation: str) -> None:
+    payload: object = "export"
+    if mutation == "bool_direction":
+        payload = True
+    elif mutation == "uppercase":
+        payload = "Export"
+    elif mutation == "empty":
+        payload = ""
+    elif mutation == "unknown":
+        payload = "convert"
+    elif mutation == "bytes_direction":
+        payload = b"export"
+    else:
+        payload = "export "
+    with pytest.raises(ValueError):
+        _ = basis_profile_conversion_bytes(direction=payload)
