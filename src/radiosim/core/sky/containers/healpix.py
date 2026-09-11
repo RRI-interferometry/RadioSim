@@ -9,7 +9,7 @@ re-runs every pydantic validator (use it instead of
 
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from pydantic import field_validator, model_validator
@@ -26,6 +26,13 @@ from ._shared import (
 from .constants import BrightnessConversion
 from .point import TangentPolarizationFrame
 from .polarization_materialization import PolarizationMaterializationEvidence
+
+if TYPE_CHECKING:
+    from ._native_interchange import NativeChainEvidence
+
+    NativeMaterialization = PolarizationMaterializationEvidence | NativeChainEvidence
+else:
+    NativeMaterialization = PolarizationMaterializationEvidence
 
 
 @dataclass(frozen=True, eq=False, config=_FROZEN_NDARRAY_CONFIG)
@@ -101,7 +108,7 @@ class HealpixData:
     #: Canonical frame joined to the attached evidence; no implicit declaration.
     tangent_polarization_frame: TangentPolarizationFrame | None = None
     #: Actual stored-value evidence, validated after constructor normalization.
-    polarization_materialization: PolarizationMaterializationEvidence | None = None
+    polarization_materialization: NativeMaterialization | None = None
 
     @field_validator("tangent_polarization_frame", mode="plain")
     @classmethod
@@ -112,17 +119,21 @@ class HealpixData:
 
     @field_validator("polarization_materialization", mode="plain")
     @classmethod
-    def _preserve_materialization(
-        cls, value: object
-    ) -> PolarizationMaterializationEvidence | None:
-        if value is not None and type(value) is not PolarizationMaterializationEvidence:
-            raise ValueError("native materialization requires typed evidence")
-        return value
+    def _preserve_materialization(cls, value: object) -> NativeMaterialization | None:
+        if value is None:
+            return None
+        if type(value) is PolarizationMaterializationEvidence:
+            return value
+        from ._native_interchange import NativeChainEvidence as ChainEvidence
+
+        if type(value) is ChainEvidence:
+            return value
+        raise ValueError("native materialization requires typed evidence")
 
     def validate_polarization_materialization(
         self, *, brightness_conversion: BrightnessConversion | None = None
     ) -> None:
-        """Validate attached canonical identity against actual stored values.
+        """Validate attached identity or depth-1 sorted-child evidence.
 
         The caller must exclude mutation/rebinding through every payload,
         frequency-axis and pixel-ID alias for the full validation interval,
@@ -150,19 +161,15 @@ class HealpixData:
                     "native tangent frame requires materialization evidence"
                 )
             return
-        if type(cast(object, evidence)) is not PolarizationMaterializationEvidence:
-            raise ValueError("native materialization requires typed evidence")
-        from ._polarization_materialization import require_native_identity
+        from ._native_interchange import require_native_materialization
 
-        require_native_identity(
+        require_native_materialization(
             self,
             brightness_conversion=(
                 evidence.brightness_conversion
                 if brightness_conversion is None
                 else brightness_conversion
             ),
-            source_profile="radiosim_ne_iau_v1",
-            tangent_frame=self.tangent_polarization_frame,
             expected=evidence,
         )
 

@@ -207,11 +207,11 @@ def complete_model_native_identity(
         raise ValueError("native identity requires a HEALPix component")
     existing = owner.polarization_materialization
     if existing is not None:
-        require_native_identity(
+        from ._native_interchange import require_native_materialization
+
+        require_native_materialization(
             owner,
             brightness_conversion=resolved.brightness_conversion,
-            source_profile=source_profile,
-            tangent_frame=tangent_frame,
             expected=existing,
         )
         return resolved

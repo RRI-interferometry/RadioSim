@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from radiosim.core.sky.containers._native_interchange import (
+    NativeChainEvidence,
     SerializedNativePayload,
     basis_profile_conversion_bytes,
     bind_serialized_native,
@@ -16,11 +17,14 @@ from radiosim.core.sky.containers._native_interchange import (
     export_declaration_bytes,
     frequency_permutation_bytes,
     import_declaration_bytes,
+    require_native_materialization,
     transfer_record_bytes,
 )
 from radiosim.core.sky.containers._polarization_materialization import (
     complete_native_identity,
+    require_native_identity,
 )
+from radiosim.core.sky.containers._polarization_payload import bind_healpix_payload
 from radiosim.core.sky.containers.constants import BrightnessConversion
 from radiosim.core.sky.containers.healpix import HealpixData
 from radiosim.core.sky.containers.point import TangentPolarizationFrame
@@ -687,3 +691,164 @@ def test_sorted_child_refuses_invalid_actual_input(mutation: str) -> None:
         kwargs["tangent_frame"] = None
     with pytest.raises(ValueError):
         _ = bind_sorted_canonical_child(target, **kwargs)
+
+
+def _frequency_sorted_owner(
+    owner: HealpixData, indices: tuple[int, ...]
+) -> HealpixData:
+    order = np.asarray(indices, dtype=np.int64)
+
+    def take(array: np.ndarray) -> np.ndarray:
+        return np.ascontiguousarray(array[order])
+
+    assert owner.q_maps is not None
+    assert owner.u_maps is not None
+    assert owner.v_maps is not None
+    return HealpixData(
+        maps=take(owner.maps),
+        q_maps=take(owner.q_maps),
+        u_maps=take(owner.u_maps),
+        v_maps=take(owner.v_maps),
+        frequencies=take(owner.frequencies),
+        nside=owner.nside,
+        hpx_inds=owner.hpx_inds,
+        coordinate_frame=owner.coordinate_frame,
+        ordering=owner.ordering,
+        i_brightness_conversion=owner.i_brightness_conversion,
+    )
+
+
+def _attach(
+    owner: HealpixData,
+    *,
+    frame: TangentPolarizationFrame,
+    evidence: PolarizationMaterializationEvidence | NativeChainEvidence,
+) -> HealpixData:
+    return HealpixData(
+        maps=owner.maps,
+        q_maps=owner.q_maps,
+        u_maps=owner.u_maps,
+        v_maps=owner.v_maps,
+        frequencies=owner.frequencies,
+        nside=owner.nside,
+        hpx_inds=owner.hpx_inds,
+        coordinate_frame=owner.coordinate_frame,
+        ordering=owner.ordering,
+        i_brightness_conversion=owner.i_brightness_conversion,
+        tangent_polarization_frame=frame,
+        polarization_materialization=evidence,
+    )
+
+
+def test_identity_attachment_dispatches_through_materialization_consumer() -> None:
+    owner, parent, frame = _sorted_child_owner()
+    attached = _attach(owner, frame=frame, evidence=parent)
+    assert attached.polarization_materialization is parent
+    require_native_materialization(
+        attached,
+        brightness_conversion=BrightnessConversion.RAYLEIGH_JEANS,
+        expected=parent,
+    )
+    require_native_identity(
+        attached,
+        brightness_conversion=BrightnessConversion.RAYLEIGH_JEANS,
+        source_profile="radiosim_ne_iau_v1",
+        tangent_frame=frame,
+        expected=parent,
+    )
+
+
+def test_sorted_child_attachment_replays_identity_parent_and_payload() -> None:
+    owner, parent, frame = _sorted_child_owner()
+    indices = (1, 2, 0)
+    sorted_owner = _frequency_sorted_owner(owner, indices)
+    payload = bind_healpix_payload(
+        sorted_owner, brightness_conversion=BrightnessConversion.RAYLEIGH_JEANS
+    )
+    child = bind_sorted_canonical_child(
+        owner,
+        brightness_conversion=BrightnessConversion.RAYLEIGH_JEANS,
+        source_profile="radiosim_ne_iau_v1",
+        tangent_frame=frame,
+        parent_evidence=parent,
+        source_indices=indices,
+        output_payload_sha256=payload.payload_sha256,
+        output_payload_metadata_json=payload.metadata_json,
+    )
+    attached = _attach(sorted_owner, frame=frame, evidence=child)
+    assert attached.polarization_materialization is child
+    require_native_materialization(
+        attached,
+        brightness_conversion=BrightnessConversion.RAYLEIGH_JEANS,
+        expected=child,
+    )
+    with pytest.raises(ValueError):
+        require_native_identity(
+            attached,
+            brightness_conversion=BrightnessConversion.RAYLEIGH_JEANS,
+            source_profile="radiosim_ne_iau_v1",
+            tangent_frame=frame,
+            expected=parent,
+        )
+    with pytest.raises(ValueError):
+        require_native_identity(
+            attached,
+            brightness_conversion=BrightnessConversion.RAYLEIGH_JEANS,
+            source_profile="radiosim_ne_iau_v1",
+            tangent_frame=frame,
+            expected=child,  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["unsorted_owner", "mutated_maps", "planck_context", "bool_expected"],
+)
+def test_sorted_child_attachment_refuses_invalid_actual_input(mutation: str) -> None:
+    owner, parent, frame = _sorted_child_owner()
+    indices = (1, 2, 0)
+    sorted_owner = _frequency_sorted_owner(owner, indices)
+    payload = bind_healpix_payload(
+        sorted_owner, brightness_conversion=BrightnessConversion.RAYLEIGH_JEANS
+    )
+    child = bind_sorted_canonical_child(
+        owner,
+        brightness_conversion=BrightnessConversion.RAYLEIGH_JEANS,
+        source_profile="radiosim_ne_iau_v1",
+        tangent_frame=frame,
+        parent_evidence=parent,
+        source_indices=indices,
+        output_payload_sha256=payload.payload_sha256,
+        output_payload_metadata_json=payload.metadata_json,
+    )
+    with pytest.raises(ValueError):
+        if mutation == "unsorted_owner":
+            _ = _attach(owner, frame=frame, evidence=child)
+        elif mutation == "mutated_maps":
+            changed = sorted_owner.maps.copy()
+            changed[0, 0] += 1
+            _ = HealpixData(
+                maps=changed,
+                q_maps=sorted_owner.q_maps,
+                u_maps=sorted_owner.u_maps,
+                v_maps=sorted_owner.v_maps,
+                frequencies=sorted_owner.frequencies,
+                nside=sorted_owner.nside,
+                hpx_inds=sorted_owner.hpx_inds,
+                coordinate_frame="icrs",
+                ordering="ring",
+                i_brightness_conversion="rayleigh-jeans",
+                tangent_polarization_frame=frame,
+                polarization_materialization=child,
+            )
+        elif mutation == "planck_context":
+            attached = _attach(sorted_owner, frame=frame, evidence=child)
+            attached.validate_polarization_materialization(
+                brightness_conversion=BrightnessConversion.PLANCK
+            )
+        else:
+            require_native_materialization(
+                sorted_owner,
+                brightness_conversion=BrightnessConversion.RAYLEIGH_JEANS,
+                expected=True,
+            )

@@ -1,4 +1,4 @@
-"""Unwired finite transport primitives and sorted-child factory; no owner dispatch."""
+"""Unwired finite transport primitives and sorted-child consumer; no export release."""
 
 import hashlib
 import json
@@ -11,6 +11,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from ._polarization_materialization import require_native_identity
+from ._polarization_payload import bind_healpix_payload
 from .constants import BrightnessConversion
 from .healpix import HealpixData
 from .point import TangentPolarizationFrame
@@ -73,6 +74,14 @@ def _is_exact_tuple(value: object) -> TypeGuard[tuple[object, ...]]:
     return type(value) is tuple
 
 
+def _is_object_dict(value: object) -> TypeGuard[dict[object, object]]:
+    return type(value) is dict
+
+
+def _is_object_list(value: object) -> TypeGuard[list[object]]:
+    return type(value) is list
+
+
 def _is_healpix(value: object) -> TypeGuard[HealpixData]:
     return isinstance(value, HealpixData)
 
@@ -85,6 +94,10 @@ def _is_identity_parent(
 
 def _is_tangent_frame(value: object) -> TypeGuard[TangentPolarizationFrame]:
     return type(value) is TangentPolarizationFrame
+
+
+def _is_brightness_conversion(value: object) -> TypeGuard[BrightnessConversion]:
+    return type(value) is BrightnessConversion
 
 
 def _is_rayleigh_jeans(value: object) -> TypeGuard[BrightnessConversion]:
@@ -418,7 +431,11 @@ class NativeChainEvidence:
     output_payload_metadata_json: bytes
     brightness_conversion: BrightnessConversion
     parent_evidence: PolarizationMaterializationEvidence
-    transfer_evidence: None
+    transfer_evidence: object
+
+
+def _is_chain_evidence(value: object) -> TypeGuard[NativeChainEvidence]:
+    return type(value) is NativeChainEvidence
 
 
 def bind_sorted_canonical_child(
@@ -531,4 +548,138 @@ def bind_sorted_canonical_child(
         BrightnessConversion.RAYLEIGH_JEANS,
         parent_evidence,
         None,
+    )
+
+
+def _permutation_source_indices(permutation: bytes) -> tuple[int, ...]:
+    decoded: object = json.loads(permutation.decode("utf-8"))
+    if not _is_object_dict(decoded):
+        raise ValueError("expected frequency permutation object")
+    raw: object = decoded["source_indices"] if "source_indices" in decoded else None
+    if not _is_object_list(raw):
+        raise ValueError("invalid source index")
+    checked: list[int] = []
+    for item in raw:
+        if type(item) is not int:
+            raise ValueError("invalid source index")
+        checked.append(item)
+    return tuple(checked)
+
+
+def _restore_frequency_axis(array: np.ndarray, indices: tuple[int, ...]) -> np.ndarray:
+    restored = np.empty_like(array)
+    restored[np.asarray(indices, dtype=np.int64)] = array
+    return np.ascontiguousarray(restored)
+
+
+def _identity_owner_from_sorted(
+    owner: HealpixData, indices: tuple[int, ...]
+) -> HealpixData:
+    maps = owner.maps
+    q_maps = owner.q_maps
+    u_maps = owner.u_maps
+    v_maps = owner.v_maps
+    if q_maps is None or u_maps is None or v_maps is None:
+        raise ValueError("sorted child requires all Stokes components")
+    _require(maps.shape[0] == len(indices), "permutation length differs")
+    return HealpixData(
+        maps=_restore_frequency_axis(maps, indices),
+        q_maps=_restore_frequency_axis(q_maps, indices),
+        u_maps=_restore_frequency_axis(u_maps, indices),
+        v_maps=_restore_frequency_axis(v_maps, indices),
+        frequencies=_restore_frequency_axis(owner.frequencies, indices),
+        nside=owner.nside,
+        hpx_inds=owner.hpx_inds,
+        coordinate_frame=owner.coordinate_frame,
+        ordering=owner.ordering,
+        i_unit=owner.i_unit,
+        q_unit=owner.q_unit,
+        u_unit=owner.u_unit,
+        v_unit=owner.v_unit,
+        i_brightness_conversion=owner.i_brightness_conversion,
+        q_brightness_conversion=owner.q_brightness_conversion,
+        u_brightness_conversion=owner.u_brightness_conversion,
+        v_brightness_conversion=owner.v_brightness_conversion,
+    )
+
+
+def _require_sorted_child(
+    owner: HealpixData,
+    *,
+    brightness_conversion: BrightnessConversion,
+    expected: NativeChainEvidence,
+) -> None:
+    transfer: object = expected.transfer_evidence
+    if transfer is not None:
+        raise ValueError("sorted child has no transfer")
+    if not _is_identity_parent(expected.parent_evidence):
+        raise ValueError("expected identity parent evidence")
+    if not _is_tangent_frame(expected.tangent_frame):
+        raise ValueError("expected a canonical tangent frame")
+    if expected.brightness_conversion is not brightness_conversion:
+        raise ValueError("native identity materialization mismatch")
+    if owner.tangent_polarization_frame != expected.tangent_frame:
+        raise ValueError("native identity materialization mismatch")
+    parameters = expected.operation_parameters_json
+    if not _is_exact_tuple(parameters) or len(parameters) != 1:
+        raise ValueError("sorted child requires one frequency permutation")
+    permutation = parameters[0]
+    if type(permutation) is not bytes:
+        raise ValueError("sorted child requires one frequency permutation")
+    indices = _permutation_source_indices(permutation)
+    parent_owner = _identity_owner_from_sorted(owner, indices)
+    require_native_identity(
+        parent_owner,
+        brightness_conversion=brightness_conversion,
+        source_profile=_CANONICAL,
+        tangent_frame=expected.tangent_frame,
+        expected=expected.parent_evidence,
+    )
+    payload = bind_healpix_payload(owner, brightness_conversion=brightness_conversion)
+    rebuilt = bind_sorted_canonical_child(
+        parent_owner,
+        brightness_conversion=brightness_conversion,
+        source_profile=_CANONICAL,
+        tangent_frame=expected.tangent_frame,
+        parent_evidence=expected.parent_evidence,
+        source_indices=indices,
+        output_payload_sha256=payload.payload_sha256,
+        output_payload_metadata_json=payload.metadata_json,
+    )
+    if expected != rebuilt:
+        raise ValueError("native chain materialization mismatch")
+
+
+def require_native_materialization(
+    owner: object,
+    *,
+    brightness_conversion: object,
+    expected: object,
+) -> None:
+    """Dispatch identity or depth-1 sorted-child evidence by exact type.
+
+    require_native_identity stays identity-only. This consumer does not export,
+    permute a published owner, or accept a bag of operations without replay.
+    """
+    if not _is_healpix(owner):
+        raise ValueError("expected HealpixData")
+    if _is_identity_parent(expected):
+        if not _is_brightness_conversion(brightness_conversion):
+            raise ValueError("native identity materialization mismatch")
+        require_native_identity(
+            owner,
+            brightness_conversion=brightness_conversion,
+            source_profile=_CANONICAL,
+            tangent_frame=owner.tangent_polarization_frame,
+            expected=expected,
+        )
+        return
+    if not _is_chain_evidence(expected):
+        raise ValueError("native materialization requires typed evidence")
+    if not _is_rayleigh_jeans(brightness_conversion):
+        raise ValueError("sorted child requires rayleigh-jeans")
+    _require_sorted_child(
+        owner,
+        brightness_conversion=brightness_conversion,
+        expected=expected,
     )
